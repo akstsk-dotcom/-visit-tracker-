@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SSPL Visit Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<meta name="theme-color" content="#0B2545">
+<style>
+  :root {
+    --navy: #0B2545; --navy2: #142F5C; --navy3: #1B3A5C;
+    --gold: #C9A227; --gold2: #E4C868;
+    --bg: #F3EFE6; --card: #FFFFFF; --line: #EAE4D6;
+    --ink: #16233A; --sub: #808A9C; --sub2: #A6AEBB;
+    --ok-bg: #E4F5EC; --ok-fg: #16824F; --err-bg: #FDEAEA; --err-fg: #C0392B;
+    --r-lg: 22px; --r-sm: 12px;
+    --shadow: 0 10px 30px -12px rgba(11,37,69,0.22), 0 2px 8px -2px rgba(11,37,69,0.10);
+    --shadow-sm: 0 4px 14px -6px rgba(11,37,69,0.14);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Manrope', sans-serif;
+    background:
+      radial-gradient(720px 420px at 10% -10%, rgba(201,162,39,0.10), transparent 60%),
+      radial-gradient(640px 480px at 110% 0%, rgba(11,37,69,0.08), transparent 55%),
+      var(--bg);
+    color: var(--ink); min-height: 100vh;
+  }
+  .serif { font-family: 'Fraunces', serif; }
+  button { font-family: inherit; cursor: pointer; -webkit-appearance: none; appearance: none; }
+  input, select, textarea { font-family: inherit; -webkit-appearance: none; appearance: none; }
+  ::selection { background: var(--gold2); color: var(--navy); }
+
+  .app { max-width: 460px; margin: 0 auto; min-height: 100vh; position: relative; }
+
+  .top-bar { display: flex; justify-content: flex-end; padding: 8px 12px 0; }
+  .theme-toggle { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--navy); font-size: 14px; display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-sm); }
+  .theme-toggle:active { transform: scale(0.92); }
+
+  body[data-theme="dark"] {
+    --bg: #0F1620; --card: #182231; --line: #2A3547;
+    --ink: #EDEFF3; --sub: #9AA5B4; --sub2: #6B7688;
+    --ok-bg: #113826; --ok-fg: #5FD08E; --err-bg: #3A1717; --err-fg: #F08080;
+    background:
+      radial-gradient(720px 420px at 10% -10%, rgba(201,162,39,0.08), transparent 60%),
+      radial-gradient(640px 480px at 110% 0%, rgba(20,47,92,0.35), transparent 55%),
+      var(--bg);
+  }
+  body[data-theme="dark"] .form-row input, body[data-theme="dark"] .form-row select, body[data-theme="dark"] .form-row textarea,
+  body[data-theme="dark"] .connect-box input, body[data-theme="dark"] .report-controls select { background: #101825; }
+  body[data-theme="dark"] .bottom-nav { background: rgba(24,34,49,0.9); }
+  body[data-theme="dark"] .gps-box, body[data-theme="dark"] .photo-box { background: #101825; }
+
+  .hero {
+    background: linear-gradient(160deg, var(--navy) 0%, var(--navy2) 55%, var(--navy3) 100%);
+    padding: 16px 18px 22px; color: #F4EFE3; position: relative; overflow: hidden; border-radius: 0 0 28px 28px;
+  }
+  .hero::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(260px 180px at 88% -10%, rgba(201,162,39,0.35), transparent 60%);
+  }
+  .hero-inner { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 6px; position: relative; }
+  .logo-slot { height: 34px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.98); border-radius: 9px; padding: 4px 6px; flex-shrink: 0;
+    box-shadow: 0 10px 18px -6px rgba(0,0,0,0.35), 0 3px 6px -1px rgba(0,0,0,0.25); }
+  .logo-slot img { height: 100%; max-width: 78px; width: auto; object-fit: contain; }
+  .hero-title { text-align: center; min-width: 0; overflow: hidden; }
+  .eyebrow { font-size: 9.5px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--gold2); font-weight: 700; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hero h1 { font-size: clamp(15px, 4.8vw, 21px); font-weight: 700; margin: 0; line-height: 1.15;
+    background: linear-gradient(90deg, #FFFFFF, #F4EFE3 60%, var(--gold2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+  .wrap { padding: 18px 16px 100px; }
+
+  .connect-box { background: var(--card); border-radius: var(--r-lg); border: 1px solid var(--line); padding: 20px; margin-top: 16px; box-shadow: var(--shadow); }
+  .connect-box.hidden { display: none; }
+  .connect-box label { font-size: 12px; font-weight: 700; color: var(--sub); display: block; margin-bottom: 8px; }
+  .connect-box input { width: 100%; padding: 13px 14px; border-radius: var(--r-sm); border: 1.5px solid var(--line); font-size: 13.5px; margin-bottom: 12px; background: #FAF9F5; }
+
+  .bottom-nav { position: fixed; left: 50%; transform: translateX(-50%); bottom: 0; width: 100%; max-width: 460px; display: flex;
+    background: rgba(255,255,255,0.88); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-top: 1px solid var(--line);
+    padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -8px 24px -12px rgba(11,37,69,0.18); z-index: 40; }
+  .bottom-nav.hidden { display: none; }
+  .tab { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 7px 2px; border-radius: 14px; background: none; border: none;
+    color: var(--sub2); font-weight: 700; font-size: 10.5px; }
+  .tab .ic { font-size: 18px; line-height: 1; }
+  .tab.active { color: var(--navy); }
+  .tab:active { transform: scale(0.94); }
+
+  .panel { display: none; animation: fadeUp .22s ease; }
+  .panel.active { display: block; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+  .card { background: var(--card); border-radius: var(--r-lg); border: 1px solid var(--line); padding: 20px; box-shadow: var(--shadow); margin-bottom: 14px; }
+  .card h2 { font-size: 17px; margin: 0 0 4px; }
+  .card .hint { font-size: 12px; color: var(--sub); margin-bottom: 16px; }
+  .form-row { margin-bottom: 13px; }
+  .form-row label { font-size: 11.5px; font-weight: 700; color: var(--sub); display: block; margin-bottom: 6px; }
+  .form-row input, .form-row select, .form-row textarea { width: 100%; padding: 12px 13px; border-radius: var(--r-sm); border: 1.5px solid var(--line); font-size: 14.5px; background: #FAF9F5; color: var(--ink); }
+  .form-row input:focus, .form-row select:focus, .form-row textarea:focus { outline: none; border-color: var(--gold); background: #fff; }
+  .form-2col { display: flex; gap: 10px; }
+  .form-2col > div { flex: 1; }
+  .check-row { display: flex; align-items: center; gap: 9px; margin-bottom: 16px; font-size: 13px; }
+  .check-row input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--navy); }
+
+  .btn-submit { width: 100%; background: linear-gradient(135deg, var(--navy) 0%, var(--navy2) 100%); color: #F4EFE3; border: none; border-radius: var(--r-sm);
+    padding: 15px 0; font-weight: 700; font-size: 15px; margin-top: 6px; box-shadow: 0 6px 18px -6px rgba(11,37,69,0.45); }
+  .btn-submit:disabled { opacity: 0.4; }
+  .btn-submit:active:not(:disabled) { transform: scale(0.98); }
+  .btn-ghost { width: 100%; background: #FAF9F5; border: 1.5px solid var(--line); color: var(--ink); border-radius: var(--r-sm); padding: 13px 0; font-weight: 700; font-size: 14px; }
+  .btn-ghost:active { transform: scale(0.98); }
+
+  .msg { margin-top: 13px; font-size: 13px; text-align: center; padding: 11px; border-radius: var(--r-sm); font-weight: 600; }
+  .msg.ok { background: var(--ok-bg); color: var(--ok-fg); }
+  .msg.err { background: var(--err-bg); color: var(--err-fg); }
+  .msg.hidden { display: none; }
+
+  .gps-box { background: #FAF9F5; border: 1.5px dashed var(--line); border-radius: var(--r-sm); padding: 14px; text-align: center; margin-bottom: 13px; }
+  .gps-box.captured { border-style: solid; border-color: var(--ok-fg); background: var(--ok-bg); }
+  .gps-box.error { border-style: solid; border-color: var(--err-fg); background: var(--err-bg); }
+  .gps-status { font-size: 12.5px; font-weight: 700; color: var(--sub); margin-bottom: 8px; }
+  .gps-box.captured .gps-status { color: var(--ok-fg); }
+  .gps-box.error .gps-status { color: var(--err-fg); }
+  .gps-coords { font-size: 11px; color: var(--sub); font-family: monospace; margin-top: 4px; }
+  .gps-link { font-size: 12px; color: var(--navy); text-decoration: underline; margin-top: 6px; display: inline-block; }
+
+  .photo-box { background: #FAF9F5; border: 1.5px dashed var(--line); border-radius: var(--r-sm); padding: 4px; text-align: center; margin-bottom: 13px; position: relative; overflow: hidden; min-height: 90px; display: flex; align-items: center; justify-content: center; }
+  .photo-box.captured { border-style: solid; border-color: var(--gold); padding: 0; }
+  .photo-box input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .photo-placeholder { font-size: 12.5px; color: var(--sub); font-weight: 600; padding: 24px 12px; }
+  .photo-preview { width: 100%; max-height: 220px; object-fit: cover; display: block; border-radius: 10px; }
+  .photo-retake { position: absolute; top: 8px; right: 8px; background: rgba(11,37,69,0.75); color: #fff; border: none; border-radius: 8px; padding: 6px 10px; font-size: 11px; font-weight: 700; z-index: 2; }
+
+  .req-badge { font-size: 9.5px; font-weight: 800; color: var(--err-fg); background: var(--err-bg); padding: 2px 8px; border-radius: 20px; margin-left: 6px; vertical-align: middle; }
+  .req-badge.ok { color: var(--ok-fg); background: var(--ok-bg); }
+
+  .count-badge { background: var(--navy); color: #F4EFE3; font-size: 12px; font-weight: 800; padding: 6px 14px; border-radius: 999px; box-shadow: var(--shadow-sm); }
+  .list-head { display: flex; justify-content: space-between; align-items: center; margin: 4px 0 12px; }
+
+  .member-row { background: var(--card); border-radius: var(--r-sm); border: 1px solid var(--line); padding: 11px 13px; margin-bottom: 8px; box-shadow: var(--shadow-sm); }
+  .member-row .n { font-weight: 700; font-size: 13.5px; }
+  .member-row .meta { font-size: 11.5px; color: var(--sub); margin-top: 2px; }
+
+  .report-controls-card { background: var(--card); border-radius: var(--r-lg); border: 1px solid var(--line); padding: 16px; box-shadow: var(--shadow); margin-bottom: 14px; }
+  .report-controls-card .form-2col { margin-bottom: 10px; }
+  .summary-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 2px; border-bottom: 1px solid #F1ECDD; font-size: 13px; }
+  .summary-row:last-child { border-bottom: none; }
+  .summary-row .n { font-weight: 700; }
+  .summary-row .cnt { font-weight: 800; color: var(--navy); }
+  .summary-row .cnt.behind { color: var(--err-fg); }
+
+  .visit-row { background: var(--card); border-radius: var(--r-sm); border: 1px solid var(--line); padding: 12px 13px; margin-bottom: 8px; box-shadow: var(--shadow-sm); }
+  .visit-row-top { display: flex; justify-content: space-between; gap: 8px; }
+  .visit-row .n { font-weight: 700; font-size: 13.5px; }
+  .visit-row .type-badge { font-size: 9.5px; font-weight: 800; background: var(--gold2); color: var(--navy); padding: 2px 8px; border-radius: 20px; white-space: nowrap; }
+  .visit-row .meta { font-size: 11.5px; color: var(--sub); margin-top: 4px; line-height: 1.5; }
+  .visit-row .links { display: flex; gap: 10px; margin-top: 8px; }
+  .visit-row .links a { font-size: 11.5px; color: var(--navy); font-weight: 700; text-decoration: underline; }
+
+  .empty-report { font-size: 12.5px; color: var(--sub2); text-align: center; padding: 18px 0; }
+  .btn-refresh { background: var(--card); border: 1px solid var(--line); color: var(--navy); font-size: 12px; font-weight: 700; padding: 9px 14px; border-radius: 999px; box-shadow: var(--shadow-sm); }
+
+  .footer-note { text-align: center; font-size: 11px; color: var(--sub2); margin-top: 22px; line-height: 1.6; }
+  .link-btn { background: none; border: none; color: var(--navy); text-decoration: underline; font-size: 12px; padding: 0; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="app">
+<div class="top-bar">
+  <button class="theme-toggle" id="themeToggle" title="Toggle dark / light">&#9788;</button>
+</div>
+<div class="hero">
+  <div class="hero-inner">
+    <div class="logo-slot"><span style="font-weight:800;color:#0B2545;font-size:11px;">SANI</span></div>
+    <div class="hero-title">
+      <div class="eyebrow">Sani Steels &middot; Corre Group</div>
+      <h1 class="serif">Daily Visit Tracker</h1>
+    </div>
+    <div class="logo-slot"><span style="font-weight:800;color:#C9821F;font-size:11px;">CORRE</span></div>
+  </div>
+</div>
+
+<div class="wrap">
+  <div id="connectBox" class="connect-box">
+    <label>Apps Script Web App URL</label>
+    <input type="text" id="apiUrlInput" placeholder="https://script.google.com/macros/s/.../exec">
+    <button class="btn-submit" id="connectBtn" style="margin-top:0;">Connect</button>
+  </div>
+
+  <div id="mainArea" style="display:none;">
+
+    <!-- LOG VISIT -->
+    <div class="panel active" id="panel-visit">
+      <div class="card">
+        <h2 class="serif">Log a visit</h2>
+        <div class="hint">GPS location and a live photo are both required before you can submit.</div>
+
+        <div class="form-row">
+          <label>Team Member *</label>
+          <select id="v_member"><option value="">Select team member…</option></select>
+        </div>
+        <div class="form-row">
+          <label>Visit Type *</label>
+          <select id="v_type"><option value="">Select type…</option></select>
+        </div>
+        <div class="form-row"><label>Location / Client Name *</label><input type="text" id="v_location" placeholder="e.g. Studio Aditi, Rajgarh Road site"></div>
+        <div class="form-row"><label>Area / City</label><input type="text" id="v_area" placeholder="e.g. Six Mile, Guwahati"></div>
+        <div class="form-2col">
+          <div class="form-row"><label>Person Met</label><input type="text" id="v_person"></div>
+          <div class="form-row"><label>Designation</label><input type="text" id="v_designation"></div>
+        </div>
+        <div class="form-row"><label>Contact No.</label><input type="text" id="v_contact"></div>
+
+        <div class="form-row">
+          <label>GPS Location <span class="req-badge" id="gpsBadge">Required</span></label>
+          <div class="gps-box" id="gpsBox">
+            <div class="gps-status" id="gpsStatus">Not captured yet</div>
+            <button class="btn-ghost" id="gpsCaptureBtn" type="button">&#128205; Capture my location</button>
+            <div id="gpsResult"></div>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label>Photo <span class="req-badge" id="photoBadge">Required</span></label>
+          <div class="photo-box" id="photoBox">
+            <div class="photo-placeholder" id="photoPlaceholder">&#128247; Tap to take a photo</div>
+            <input type="file" id="v_photo" accept="image/*" capture="environment">
+            <img class="photo-preview hidden" id="photoPreview" style="display:none;">
+            <button class="photo-retake hidden" id="photoRetakeBtn" style="display:none;" type="button">Retake</button>
+          </div>
+        </div>
+
+        <div class="form-row"><label>Remarks</label><textarea id="v_remarks" rows="3" placeholder="What was discussed, next steps…"></textarea></div>
+        <div class="check-row"><input type="checkbox" id="v_followup"><label for="v_followup">Follow-up needed</label></div>
+        <div class="form-row" id="followUpDateRow" style="display:none;"><label>Follow-up Date</label><input type="date" id="v_followupdate"></div>
+
+        <button class="btn-submit" id="v_submit" disabled>Save visit</button>
+        <div class="msg hidden" id="v_msg"></div>
+      </div>
+    </div>
+
+    <!-- TEAM -->
+    <div class="panel" id="panel-team">
+      <div class="card">
+        <h2 class="serif">Add team member</h2>
+        <div class="form-row"><label>Name *</label><input type="text" id="t_name"></div>
+        <div class="form-row"><label>Role</label><input type="text" id="t_role" placeholder="e.g. Marketing Executive"></div>
+        <div class="form-2col">
+          <div class="form-row"><label>Phone</label><input type="text" id="t_phone"></div>
+          <div class="form-row"><label>Base Office / Zone</label><input type="text" id="t_zone"></div>
+        </div>
+        <div class="form-row"><label>Daily Visit Target</label><input type="number" id="t_target" placeholder="e.g. 6"></div>
+        <button class="btn-submit" id="t_submit">Save team member</button>
+        <div class="msg hidden" id="t_msg"></div>
+      </div>
+
+      <div class="list-head">
+        <span class="count-badge" id="teamCountBadge">0 team members</span>
+        <button class="btn-refresh" id="teamRefreshBtn">&#8635; Refresh</button>
+      </div>
+      <div id="teamListRoot"></div>
+    </div>
+
+    <!-- REPORTING -->
+    <div class="panel" id="panel-report">
+      <div class="report-controls-card">
+        <div class="form-2col">
+          <div class="form-row"><label>From</label><input type="date" id="r_from"></div>
+          <div class="form-row"><label>To</label><input type="date" id="r_to"></div>
+        </div>
+        <div class="form-row" style="margin-bottom:0;">
+          <label>Team Member</label>
+          <select id="r_member"><option value="All">All team members</option></select>
+        </div>
+      </div>
+      <div class="list-head">
+        <span class="count-badge" id="reportCountBadge">0 visits</span>
+        <button class="btn-refresh" id="reportRefreshBtn">&#8635; Refresh</button>
+      </div>
+      <div id="reportSummaryRoot"></div>
+      <div id="reportListRoot" style="margin-top:14px;"></div>
+    </div>
+
+    <div class="footer-note">
+      Connected to your team's shared sheet. <button class="link-btn" id="disconnectBtn">Change link</button>
+    </div>
+  </div>
+</div>
+
+<div class="bottom-nav hidden" id="bottomNav">
+  <button class="tab active" data-tab="visit"><span class="ic">&#128205;</span>Log Visit</button>
+  <button class="tab" data-tab="team"><span class="ic">&#128101;</span>Team</button>
+  <button class="tab" data-tab="report"><span class="ic">&#128202;</span>Reports</button>
+</div>
+
+</div>
+
+<script>
+const CONFIG_KEY = "sspl_visit_api_url";
+const DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbzTeRhXaGp3xR-jkpnyJJwWpe99ldzvQ2dXz31_LpyPVayNXtbOi8ofhXtijM52jS5_qw/exec";
+let team = [];
+let visitTypes = [];
+let capturedGps = null; // { lat, lng, accuracy }
+let capturedPhoto = null; // base64 string
+
+const fmtDate = (d) => d ? new Date(d).toLocaleDateString("en-IN") : "";
+const esc = (s) => String(s || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function getApiUrl() { return localStorage.getItem(CONFIG_KEY) || DEFAULT_API_URL; }
+function setApiUrl(u) { localStorage.setItem(CONFIG_KEY, u.trim()); }
+function showMsg(el, text, ok) { el.textContent = text; el.className = "msg " + (ok ? "ok" : "err"); }
+
+async function loadTeamOptions() {
+  const url = getApiUrl();
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    team = data.team || [];
+    visitTypes = data.visitTypes || [];
+    const memberSel = document.getElementById("v_member");
+    memberSel.innerHTML = `<option value="">Select team member…</option>` + team.map(t => `<option value="${esc(t.name)}">${esc(t.name)}${t.role ? " — " + esc(t.role) : ""}</option>`).join("");
+    const typeSel = document.getElementById("v_type");
+    typeSel.innerHTML = `<option value="">Select type…</option>` + visitTypes.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join("");
+    const rMemberSel = document.getElementById("r_member");
+    rMemberSel.innerHTML = `<option value="All">All team members</option>` + team.map(t => `<option value="${esc(t.name)}">${esc(t.name)}</option>`).join("");
+    return true;
+  } catch (e) { return false; }
+}
+
+async function postEntry(payload) {
+  const url = getApiUrl();
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload) });
+  return res.json();
+}
+
+// ---------------- Connect / disconnect ----------------
+document.getElementById("connectBtn").addEventListener("click", async () => {
+  const url = document.getElementById("apiUrlInput").value.trim();
+  if (!url) return;
+  setApiUrl(url);
+  const ok = await loadTeamOptions();
+  if (ok) {
+    document.getElementById("connectBox").classList.add("hidden");
+    document.getElementById("mainArea").style.display = "block";
+    document.getElementById("bottomNav").classList.remove("hidden");
+    initReportDates();
+    loadTeamList();
+    primePermissions();
+  } else {
+    alert("Couldn't connect. Check the link and make sure it ends in /exec.");
+  }
+});
+document.getElementById("disconnectBtn").addEventListener("click", () => {
+  localStorage.removeItem(CONFIG_KEY);
+  document.getElementById("mainArea").style.display = "none";
+  document.getElementById("bottomNav").classList.add("hidden");
+  document.getElementById("connectBox").classList.remove("hidden");
+});
+
+// ---------------- Tabs ----------------
+document.querySelectorAll(".tab").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("panel-" + btn.dataset.tab).classList.add("active");
+    if (btn.dataset.tab === "report") loadReport();
+  });
+});
+
+// ---------------- GPS capture ----------------
+document.getElementById("gpsCaptureBtn").addEventListener("click", () => {
+  const box = document.getElementById("gpsBox");
+  const status = document.getElementById("gpsStatus");
+  const result = document.getElementById("gpsResult");
+  box.className = "gps-box";
+  status.textContent = "Getting your location…";
+
+  if (!navigator.geolocation) {
+    box.className = "gps-box error";
+    status.textContent = "This browser can't access GPS.";
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      capturedGps = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy };
+      box.className = "gps-box captured";
+      status.textContent = "Location captured";
+      result.innerHTML = `
+        <div class="gps-coords">${capturedGps.lat.toFixed(6)}, ${capturedGps.lng.toFixed(6)} (±${Math.round(capturedGps.accuracy)}m)</div>
+        <a class="gps-link" href="https://www.google.com/maps?q=${capturedGps.lat},${capturedGps.lng}" target="_blank">View on Google Maps</a>`;
+      document.getElementById("gpsBadge").textContent = "Captured";
+      document.getElementById("gpsBadge").classList.add("ok");
+      updateSubmitState();
+    },
+    (err) => {
+      capturedGps = null;
+      box.className = "gps-box error";
+      status.textContent = (err.code === 1 ? "Location permission denied. " : "Couldn't get your location. ") + "(" + (err.message || "error " + err.code) + ")";
+      updateSubmitState();
+    },
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+  );
+});
+
+// ---------------- Photo capture (with client-side compression) ----------------
+document.getElementById("v_photo").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const img = new Image();
+    img.onload = () => {
+      const maxW = 1280;
+      const scale = Math.min(1, maxW / img.width);
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      capturedPhoto = canvas.toDataURL("image/jpeg", 0.72);
+
+      const box = document.getElementById("photoBox");
+      const preview = document.getElementById("photoPreview");
+      const placeholder = document.getElementById("photoPlaceholder");
+      const retake = document.getElementById("photoRetakeBtn");
+      preview.src = capturedPhoto;
+      preview.style.display = "block";
+      placeholder.style.display = "none";
+      retake.style.display = "block";
+      box.classList.add("captured");
+      document.getElementById("photoBadge").textContent = "Captured";
+      document.getElementById("photoBadge").classList.add("ok");
+      updateSubmitState();
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+});
+document.getElementById("photoRetakeBtn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  capturedPhoto = null;
+  document.getElementById("v_photo").value = "";
+  document.getElementById("photoPreview").style.display = "none";
+  document.getElementById("photoPlaceholder").style.display = "block";
+  document.getElementById("photoRetakeBtn").style.display = "none";
+  document.getElementById("photoBox").classList.remove("captured");
+  document.getElementById("photoBadge").textContent = "Required";
+  document.getElementById("photoBadge").classList.remove("ok");
+  updateSubmitState();
+});
+
+document.getElementById("v_followup").addEventListener("change", (e) => {
+  document.getElementById("followUpDateRow").style.display = e.target.checked ? "block" : "none";
+});
+
+function updateSubmitState() {
+  const member = document.getElementById("v_member").value;
+  const type = document.getElementById("v_type").value;
+  const location = document.getElementById("v_location").value.trim();
+  const ready = member && type && location && capturedGps && capturedPhoto;
+  document.getElementById("v_submit").disabled = !ready;
+}
+["v_member","v_type","v_location"].forEach(id => {
+  document.getElementById(id).addEventListener("input", updateSubmitState);
+  document.getElementById(id).addEventListener("change", updateSubmitState);
+});
+
+// ---------------- Submit visit ----------------
+document.getElementById("v_submit").addEventListener("click", async () => {
+  const msg = document.getElementById("v_msg");
+  msg.className = "msg hidden";
+  if (!capturedGps || !capturedPhoto) { showMsg(msg, "GPS and photo are both required.", false); return; }
+
+  const btn = document.getElementById("v_submit");
+  btn.disabled = true; btn.textContent = "Saving…";
+  try {
+    const result = await postEntry({
+      type: "visit",
+      member: document.getElementById("v_member").value,
+      visitType: document.getElementById("v_type").value,
+      location: document.getElementById("v_location").value.trim(),
+      area: document.getElementById("v_area").value.trim(),
+      personMet: document.getElementById("v_person").value.trim(),
+      designation: document.getElementById("v_designation").value.trim(),
+      contact: document.getElementById("v_contact").value.trim(),
+      lat: capturedGps.lat, lng: capturedGps.lng,
+      photoBase64: capturedPhoto,
+      remarks: document.getElementById("v_remarks").value.trim(),
+      followUp: document.getElementById("v_followup").checked,
+      followUpDate: document.getElementById("v_followupdate").value,
+    });
+    if (result.ok) {
+      showMsg(msg, "Visit saved.", true);
+      ["v_location","v_area","v_person","v_designation","v_contact","v_remarks"].forEach(id => document.getElementById(id).value = "");
+      document.getElementById("v_member").value = "";
+      document.getElementById("v_type").value = "";
+      document.getElementById("v_followup").checked = false;
+      document.getElementById("followUpDateRow").style.display = "none";
+      document.getElementById("v_followupdate").value = "";
+      capturedGps = null; capturedPhoto = null;
+      document.getElementById("gpsBox").className = "gps-box";
+      document.getElementById("gpsStatus").textContent = "Not captured yet";
+      document.getElementById("gpsResult").innerHTML = "";
+      document.getElementById("gpsBadge").textContent = "Required";
+      document.getElementById("gpsBadge").classList.remove("ok");
+      document.getElementById("v_photo").value = "";
+      document.getElementById("photoPreview").style.display = "none";
+      document.getElementById("photoPlaceholder").style.display = "block";
+      document.getElementById("photoRetakeBtn").style.display = "none";
+      document.getElementById("photoBox").classList.remove("captured");
+      document.getElementById("photoBadge").textContent = "Required";
+      document.getElementById("photoBadge").classList.remove("ok");
+    } else {
+      showMsg(msg, "Error: " + (result.error || "couldn't save."), false);
+    }
+  } catch (e) {
+    showMsg(msg, "Network error — check your connection and try again.", false);
+  }
+  updateSubmitState();
+  btn.textContent = "Save visit";
+});
+
+// ---------------- Team ----------------
+document.getElementById("t_submit").addEventListener("click", async () => {
+  const name = document.getElementById("t_name").value.trim();
+  const msg = document.getElementById("t_msg");
+  msg.className = "msg hidden";
+  if (!name) { showMsg(msg, "Name is required.", false); return; }
+  const btn = document.getElementById("t_submit");
+  btn.disabled = true; btn.textContent = "Saving…";
+  try {
+    const result = await postEntry({
+      type: "team_member", name: name,
+      role: document.getElementById("t_role").value,
+      phone: document.getElementById("t_phone").value,
+      zone: document.getElementById("t_zone").value,
+      target: document.getElementById("t_target").value,
+    });
+    if (result.ok) {
+      showMsg(msg, "Team member added.", true);
+      ["t_name","t_role","t_phone","t_zone","t_target"].forEach(id => document.getElementById(id).value = "");
+      await loadTeamOptions();
+      await loadTeamList();
+    } else { showMsg(msg, "Error: " + (result.error || "couldn't save."), false); }
+  } catch (e) { showMsg(msg, "Network error — check your connection and try again.", false); }
+  btn.disabled = false; btn.textContent = "Save team member";
+});
+
+async function loadTeamList() {
+  const root = document.getElementById("teamListRoot");
+  root.innerHTML = `<div class="empty-report">Loading team…</div>`;
+  const ok = await loadTeamOptions();
+  if (!ok) { root.innerHTML = `<div class="empty-report">Couldn't load team list.</div>`; return; }
+  document.getElementById("teamCountBadge").textContent = `${team.length} team member${team.length===1?"":"s"}`;
+  if (!team.length) { root.innerHTML = `<div class="empty-report">No team members added yet.</div>`; return; }
+  root.innerHTML = team.map(t => `
+    <div class="member-row">
+      <div class="n">${esc(t.name)}</div>
+      <div class="meta">${esc(t.role || "—")}${t.zone ? " · " + esc(t.zone) : ""}</div>
+    </div>
+  `).join("");
+}
+document.getElementById("teamRefreshBtn").addEventListener("click", loadTeamList);
+
+// ---------------- Reporting ----------------
+function initReportDates() {
+  const today = new Date().toISOString().slice(0,10);
+  document.getElementById("r_from").value = today;
+  document.getElementById("r_to").value = today;
+}
+
+async function loadReport() {
+  const summaryRoot = document.getElementById("reportSummaryRoot");
+  const listRoot = document.getElementById("reportListRoot");
+  summaryRoot.innerHTML = `<div class="empty-report">Loading report…</div>`;
+  listRoot.innerHTML = "";
+
+  const from = document.getElementById("r_from").value;
+  const to = document.getElementById("r_to").value;
+  const memberFilter = document.getElementById("r_member").value;
+  const todayStr = new Date().toISOString().slice(0,10);
+
+  const url = getApiUrl() + (getApiUrl().includes("?") ? "&" : "?") + "action=visits";
+  let data;
+  try {
+    const res = await fetch(url);
+    data = await res.json();
+  } catch (e) {
+    summaryRoot.innerHTML = `<div class="empty-report">Couldn't load the report — check your connection.</div>`;
+    return;
+  }
+
+  const allVisits = data.visits || [];
+  const teamData = data.team || [];
+
+  const inRange = allVisits.filter(v => {
+    if (!v.date) return false;
+    if (from && v.date < from) return false;
+    if (to && v.date > to) return false;
+    if (memberFilter !== "All" && v.member !== memberFilter) return false;
+    return true;
+  });
+
+  document.getElementById("reportCountBadge").textContent = `${inRange.length} visit${inRange.length===1?"":"s"}`;
+
+  // Summary per team member
+  const summaryList = (memberFilter === "All" ? teamData : teamData.filter(t => t.name === memberFilter));
+  if (!summaryList.length) {
+    summaryRoot.innerHTML = `<div class="empty-report">No team members to summarize.</div>`;
+  } else {
+    summaryRoot.innerHTML = summaryList.map(t => {
+      const inRangeCount = inRange.filter(v => v.member === t.name).length;
+      const todayCount = allVisits.filter(v => v.member === t.name && v.date === todayStr).length;
+      const target = Number(t.target || 0);
+      const behind = target > 0 && todayCount < target;
+      return `<div class="summary-row"><span class="n">${esc(t.name)}</span><span>${inRangeCount} in range · <span class="cnt ${behind ? "behind" : ""}">${todayCount}${target ? "/" + target : ""} today</span></span></div>`;
+    }).join("");
+  }
+
+  // Filtered visit log, most recent first
+  if (!inRange.length) {
+    listRoot.innerHTML = `<div class="empty-report">No visits logged in this range yet.</div>`;
+    return;
+  }
+  const sorted = inRange.slice().sort((a,b) => (b.date + b.time).localeCompare(a.date + a.time));
+  listRoot.innerHTML = sorted.map(v => `
+    <div class="visit-row">
+      <div class="visit-row-top">
+        <div><div class="n">${esc(v.member)}</div><div class="meta">${esc(v.location)}${v.area ? " · " + esc(v.area) : ""}</div></div>
+        <span class="type-badge">${esc(v.visitType)}</span>
+      </div>
+      <div class="meta">${esc(v.date)} · ${esc(v.time)}${v.personMet ? " · Met: " + esc(v.personMet) : ""}${v.followUp === "Y" ? " · Follow-up: " + esc(v.followUpDate || "yes") : ""}</div>
+      ${v.remarks ? `<div class="meta">${esc(v.remarks)}</div>` : ""}
+      <div class="links">
+        ${v.mapsLink ? `<a href="${esc(v.mapsLink)}" target="_blank">&#128205; Map</a>` : ""}
+        ${v.photoLink ? `<a href="${esc(v.photoLink)}" target="_blank">&#128247; Photo</a>` : ""}
+      </div>
+    </div>
+  `).join("");
+}
+document.getElementById("reportRefreshBtn").addEventListener("click", loadReport);
+document.getElementById("r_from").addEventListener("change", loadReport);
+document.getElementById("r_to").addEventListener("change", loadReport);
+document.getElementById("r_member").addEventListener("change", loadReport);
+
+// ---------------- Theme toggle ----------------
+const THEME_KEY = "sspl_visit_theme";
+function applyTheme(theme) {
+  document.body.setAttribute("data-theme", theme);
+  document.getElementById("themeToggle").innerHTML = theme === "dark" ? "&#9789;" : "&#9788;";
+}
+(function initTheme() {
+  applyTheme(localStorage.getItem(THEME_KEY) || "light");
+})();
+document.getElementById("themeToggle").addEventListener("click", () => {
+  const next = (document.body.getAttribute("data-theme") || "light") === "dark" ? "light" : "dark";
+  localStorage.setItem(THEME_KEY, next);
+  applyTheme(next);
+});
+
+// ---------------- Upfront permission priming ----------------
+// Ask for GPS and camera access the moment the app opens, so the field team
+// isn't hit with permission prompts mid-way through filling a visit form.
+function primePermissions() {
+  // GPS: trigger the OS/browser prompt once. If granted, we also keep the
+  // fresh reading — but each visit should still tap "Capture my location"
+  // so the coordinates match the moment they arrive, not app-open time.
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      () => { /* permission granted — nothing else to do here */ },
+      () => { /* user can still grant later via the Capture button */ },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  }
+  // Camera: prime the permission via getUserMedia, then immediately release
+  // the stream. Actual photo capture still uses the native camera picker
+  // (more reliable across devices), this just surfaces the prompt early.
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+      .then(stream => { stream.getTracks().forEach(t => t.stop()); })
+      .catch(() => { /* user can still grant later when taking a photo */ });
+  }
+}
+
+// Auto-connect if already configured
+(async function init() {
+  const saved = getApiUrl();
+  if (saved) {
+    document.getElementById("apiUrlInput").value = saved;
+    const ok = await loadTeamOptions();
+    if (ok) {
+      document.getElementById("connectBox").classList.add("hidden");
+      document.getElementById("mainArea").style.display = "block";
+      document.getElementById("bottomNav").classList.remove("hidden");
+      initReportDates();
+      loadTeamList();
+      primePermissions();
+    }
+  }
+})();
+</script>
+</body>
+</html>
