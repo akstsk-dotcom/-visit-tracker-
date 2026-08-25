@@ -1014,7 +1014,8 @@ function parseBulk(text) {
       email: (parts[4] || "").trim(),
       registered: (parts[5] || "").trim().toUpperCase() === "Y",
     };
-  }).filter(r => r.name);
+  }).filter(r => r.name && r.name.toLowerCase() !== "name")
+    .filter((r, i, arr) => arr.findIndex(x => x.name.toLowerCase() === r.name.toLowerCase()) === i);
 }
 document.getElementById("bulk_paste").addEventListener("input", (e) => {
   const items = parseBulk(e.target.value);
@@ -1027,6 +1028,18 @@ function looksLikeHeaderRow(row) {
   if (!row || !row.length) return false;
   const first = String(row[0] || "").trim().toLowerCase();
   return HEADER_WORDS.some(w => first.includes(w));
+}
+// A master sheet often carries title/instruction rows ABOVE the real column
+// headers. Find the true header row so that preamble never becomes a specifier.
+function findHeaderIndex(rows) {
+  for (let i = 0; i < Math.min(rows.length, 12); i++) {
+    const cells = (rows[i] || []).map(c => String(c || "").trim().toLowerCase());
+    if (!cells.length) continue;
+    if (cells[0] === "name") return i;
+    const labelled = cells.filter(c => c && HEADER_WORDS.some(w => c === w || c.startsWith(w))).length;
+    if (labelled >= 3) return i;
+  }
+  return -1;
 }
 
 document.getElementById("bulk_file").addEventListener("change", (e) => {
@@ -1046,8 +1059,10 @@ document.getElementById("bulk_file").addEventListener("change", (e) => {
       const sheet = workbook.Sheets[firstSheetName];
       let rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" });
 
-      // Drop a header row if the first row looks like column labels
-      if (rows.length && looksLikeHeaderRow(rows[0])) rows = rows.slice(1);
+      // Drop the header row AND anything above it (titles, instructions)
+      const hIdx = findHeaderIndex(rows);
+      if (hIdx >= 0) rows = rows.slice(hIdx + 1);
+      else if (rows.length && looksLikeHeaderRow(rows[0])) rows = rows.slice(1);
 
       // Drop fully blank rows
       rows = rows.filter(r => r.some(cell => String(cell || "").trim()));
@@ -1083,20 +1098,48 @@ document.getElementById("bulk_submit").addEventListener("click", async () => {
   msg.className = "msg hidden";
   if (!items.length) { showMsg(msg, "Paste at least one row with a name.", false); return; }
   const btn = document.getElementById("bulk_submit");
-  btn.disabled = true; btn.textContent = "Uploading…";
+  btn.disabled = true; btn.textContent = "Uploading\u2026";
+
+  const clearBulkForm = () => {
+    document.getElementById("bulk_paste").value = "";
+    document.getElementById("bulk_preview").textContent = "";
+    document.getElementById("bulk_file").value = "";
+    document.getElementById("fileDropZone").classList.remove("has-file");
+    document.getElementById("fileDropText").textContent = "\u{1F4C1} Tap to choose a .xlsx, .xls or .csv file";
+  };
+
   try {
-    const result = await postEntry({ type: "specifiers_bulk", items: items });
-    if (result.ok) {
+    let result = null;
+    try { result = await postEntry({ type: "specifiers_bulk", items: items }); } catch (e) { result = null; }
+
+    if (result && result.ok) {
       showMsg(msg, `${items.length} specifier${items.length>1?"s":""} uploaded.`, true);
-      document.getElementById("bulk_paste").value = "";
-      document.getElementById("bulk_preview").textContent = "";
-      document.getElementById("bulk_file").value = "";
-      document.getElementById("fileDropZone").classList.remove("has-file");
-      document.getElementById("fileDropText").textContent = "\u{1F4C1} Tap to choose a .xlsx, .xls or .csv file";
-      await loadOptions();
-      await loadSpecifierList();
-    } else { showMsg(msg, "Error: " + (result.error || "couldn't upload."), false); }
-  } catch (e) { showMsg(msg, "Network error — check your connection and try again.", false); }
+      clearBulkForm();
+      await loadOptions(); await loadSpecifierList();
+    } else {
+      // Backend doesn't support the bulk type yet — send them one at a time.
+      let done = 0; const failed = [];
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        try {
+          const r = await postEntry({
+            type: "specifier", name: it.name, firm: it.firm, phone: it.phone,
+            city: it.city, email: it.email, registered: it.registered,
+          });
+          if (r && r.ok) done++; else failed.push(it.name);
+        } catch (e) { failed.push(it.name); }
+        btn.textContent = `Uploading\u2026 ${i+1}/${items.length}`;
+      }
+      if (done) {
+        showMsg(msg, `${done} of ${items.length} specifier${items.length>1?"s":""} uploaded.` +
+          (failed.length ? ` ${failed.length} failed: ${failed.slice(0,3).join(", ")}${failed.length>3?"\u2026":""}` : ""), true);
+        clearBulkForm();
+        await loadOptions(); await loadSpecifierList();
+      } else {
+        showMsg(msg, "Couldn't upload. Check the Apps Script link, then try again.", false);
+      }
+    }
+  } catch (e) { showMsg(msg, "Network error \u2014 check your connection and try again.", false); }
   btn.disabled = false; btn.textContent = "Upload all";
 });
 
