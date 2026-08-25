@@ -423,6 +423,32 @@
   .chk-row input { width: 17px; height: 17px; margin: 1px 0 0; flex-shrink: 0; accent-color: var(--navy); }
   .new-party { background: var(--warn-soft); border: 1px solid #F0DCB4; border-radius: var(--r-sm); padding: 10px 12px; }
 
+  /* ---- party picker ---- */
+  .picker-btn {
+    width: 100%; text-align: left; padding: 13px 15px; border-radius: var(--r-sm);
+    border: 1.5px solid var(--line); background: #FAF9F5; color: var(--ink);
+    font-size: 15px; font-weight: 600; font-family: inherit; position: relative;
+  }
+  body[data-theme="dark"] .picker-btn { background: #0E1622; }
+  .picker-btn.empty { color: var(--sub2); font-weight: 500; }
+  .picker-btn::after { content: "▾"; position: absolute; right: 15px; top: 50%; transform: translateY(-50%); color: var(--sub2); font-size: 13px; }
+  .picker-btn:focus, .picker-btn.filled { border-color: var(--gold); outline: none; }
+  .picker-btn .sub { display: block; font-size: 11.5px; color: var(--sub); font-weight: 500; margin-top: 2px; }
+  .spec-count { font-size: 10.5px; color: var(--sub2); font-weight: 700; }
+
+  .pick-search { width: 100%; padding: 12px 14px; border-radius: var(--r-sm); border: 1.5px solid var(--line); font-size: 15px; font-family: inherit; background: #FAF9F5; margin-bottom: 10px; }
+  body[data-theme="dark"] .pick-search { background: #0E1622; color: var(--ink); }
+  .pick-list { max-height: 46vh; overflow-y: auto; -webkit-overflow-scrolling: touch; margin: 0 -4px; }
+  .pick-row { width: 100%; text-align: left; background: none; border: none; border-bottom: 1px solid var(--line); padding: 12px 6px; font-family: inherit; }
+  .pick-row:last-child { border-bottom: none; }
+  .pick-row:active { background: #F4F1E8; }
+  body[data-theme="dark"] .pick-row:active { background: #101825; }
+  .pick-name { font-size: 14.5px; font-weight: 700; color: var(--ink); }
+  .pick-meta { font-size: 11.5px; color: var(--sub); margin-top: 2px; }
+  .pick-new { background: var(--warn-soft); border: 1px solid #F0DCB4; border-radius: var(--r-sm); margin-bottom: 8px; }
+  .pick-new .pick-name { color: var(--warn); }
+  .pick-empty { text-align: center; padding: 22px 10px; color: var(--sub2); font-size: 13px; line-height: 1.6; }
+
   .bottom-nav.hidden { display: none; }
 </style>
 </head>
@@ -518,7 +544,16 @@ Rahul Verma	RV Architects			N"></textarea>
       <div class="card">
         <h2 class="serif">Log a bill</h2>
         <div class="form-row"><label>Date</label><input type="date" id="b_date"></div>
-        <div class="form-row"><label>Bill No.</label><input type="text" id="b_billno" placeholder="e.g. INV-2026-0451"></div>
+        <div class="form-2col">
+          <div class="form-row"><label>Bill No.</label><input type="text" id="b_billno" placeholder="e.g. INV-2026-0451"></div>
+          <div class="form-row">
+            <label>Branch <span class="req-star">*</span></label>
+            <select id="b_branch">
+              <option value="Guwahati">Guwahati</option>
+              <option value="Jorabat">Jorabat</option>
+            </select>
+          </div>
+        </div>
         <div class="form-row">
           <label class="lbl-row">Specifier <button type="button" class="mini-add" id="addSpecBtn">+ Add new</button></label>
           <select id="b_specifier"><option value="">Select specifier…</option></select>
@@ -581,9 +616,10 @@ Rahul Verma	RV Architects			N"></textarea>
         </div>
 
         <div class="form-row">
-          <label>Party / Specifier <span class="req-star">*</span></label>
-          <input type="text" id="v_party" list="v_party_list" placeholder="Start typing — picks from your specifier list">
-          <datalist id="v_party_list"></datalist>
+          <label class="lbl-row">Party / Specifier <span class="req-star">*</span>
+            <span class="spec-count" id="specCount"></span></label>
+          <button type="button" class="picker-btn empty" id="v_party_btn">Tap to choose or add a party</button>
+          <input type="hidden" id="v_party">
         </div>
 
         <div class="form-row new-party" id="newPartyRow" style="display:none;">
@@ -1174,11 +1210,12 @@ document.getElementById("b_submit").addEventListener("click", async () => {
       type: "transaction", date: document.getElementById("b_date").value,
       billNo: document.getElementById("b_billno").value, specifier: specifier,
       brand: document.getElementById("b_brand").value, value: value,
+      branch: document.getElementById("b_branch").value,
       notes: document.getElementById("b_notes").value,
     });
     if (result.ok) {
       showMsg(msg, "Saved to the sheet.", true);
-      addRecent(`₹${Number(value).toLocaleString("en-IN")}`, `${specifier} · ${document.getElementById("b_brand").value || "—"}`);
+      addRecent(`₹${Number(value).toLocaleString("en-IN")}`, `${specifier} · ${document.getElementById("b_brand").value || "—"} · ${document.getElementById("b_branch").value}`);
       document.getElementById("b_billno").value = "";
       document.getElementById("b_value").value = "";
       document.getElementById("b_notes").value = "";
@@ -1460,6 +1497,7 @@ let PR = {
   teamRange: "today",
   vrepRange: "today",
   headUnlocked: false,
+  specTried: false,
 };
 
 let APP_MODE = "scheme";
@@ -1942,7 +1980,8 @@ async function submitVisit() {
 }
 
 function resetVisitForm() {
-  ["v_party","v_firm","v_contact","v_potential","v_notes"].forEach(id => document.getElementById(id).value = "");
+  ["v_firm","v_contact","v_potential","v_notes"].forEach(id => document.getElementById(id).value = "");
+  clearParty();
   document.getElementById("v_followup").value = "";
   PR.photo = null;
   document.getElementById("photoPrev").innerHTML = "";
@@ -2008,22 +2047,31 @@ function renderSyncBanner() {
   const el = document.getElementById("vSyncBanner");
   if (!el) return;
   const left = PR.queue.length;
+  // Visit mode hides the connect box, so a device whose specifier list failed
+  // to load would otherwise show an empty picker with no explanation.
+  const linkWarn = (PR.specTried && !(specifiers || []).length)
+    ? `<div class="banner warn"><span class="bic">&#128279;</span>
+        <span><b>Specifier list didn't load.</b> You can still log visits by typing the party name.</span>
+        <button id="reloadSpecBtn">Retry</button></div>`
+    : "";
   const originWarn = geoBlockedByOrigin()
     ? `<div class="banner warn"><span class="bic">&#128241;</span>
         <span><b>GPS unavailable — this file was ${originLabel()}.</b> Visits can't be saved. Open the app from its https:// link instead.</span>
         <button id="originHelpBtn">Details</button></div>`
     : "";
   if (!left) {
-    el.innerHTML = originWarn;
+    el.innerHTML = linkWarn + originWarn;
     const ob = document.getElementById("originHelpBtn");
     if (ob) ob.addEventListener("click", () => openOnboarding(4));
+    wireLinkBtns();
     return;
   }
-  el.innerHTML = originWarn + `<div class="banner warn"><span class="bic">&#8635;</span>
+  el.innerHTML = linkWarn + originWarn + `<div class="banner warn"><span class="bic">&#8635;</span>
     <span><b>${left} visit${left>1?"s":""} waiting to sync.</b> They're safe on this device and will upload automatically.</span>
     <button id="syncNowBtn">Sync now</button></div>`;
   const ob2 = document.getElementById("originHelpBtn");
   if (ob2) ob2.addEventListener("click", () => openOnboarding(4));
+  wireLinkBtns();
   document.getElementById("syncNowBtn").addEventListener("click", async () => {
     const r = await syncQueue();
     renderSyncBanner();
@@ -2304,6 +2352,17 @@ function renderTeamSettings() {
     btn.disabled = false; btn.innerHTML = "&#8635; Pull latest from team sheet";
     showMsg(document.getElementById("set_msg"), ok ? "Team data refreshed." : "Couldn't reach the sheet — showing this device's data.", ok);
     renderTeam();
+  });
+}
+
+
+/* Let the user link this device to the sheet without leaving visit mode. */
+function wireLinkBtns() {
+  const r = document.getElementById("reloadSpecBtn");
+  if (r) r.addEventListener("click", async () => {
+    r.textContent = "Loading…";
+    try { await loadOptions(); } catch (e) {}
+    refreshParties(); renderSyncBanner();
   });
 }
 
@@ -2593,13 +2652,109 @@ function applyRole() {
   if (pl) pl.innerHTML = PR.settings.requirePhoto ? `Visit photo <span class="req-star">*</span>` : "Visit photo";
 }
 
+function partyPool() {
+  const pool = [];
+  const seen = new Set();
+  (specifiers || []).forEach(s => {
+    const k = String(s.name || "").trim().toLowerCase();
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    pool.push({ name: s.name, firm: s.firm || "", phone: s.phone || "", city: s.city || "", known: true });
+  });
+  PR.visits.forEach(v => {
+    const k = String(v.party || "").trim().toLowerCase();
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    pool.push({ name: v.party, firm: v.firm || "", phone: v.contact || "", city: "", known: false });
+  });
+  return pool.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function refreshParties() {
-  const dl = document.getElementById("v_party_list");
-  if (!dl) return;
-  const fromSpecs = (specifiers || []).map(s => s.name);
-  const fromVisits = PR.visits.map(v => v.party);
-  dl.innerHTML = [...new Set([...fromSpecs, ...fromVisits])].filter(Boolean).sort()
-    .map(n => `<option value="${esc(n)}">`).join("");
+  const c = document.getElementById("specCount");
+  if (!c) return;
+  const n = partyPool().length;
+  c.textContent = n ? n + " on file" : "";
+}
+
+function setParty(name, rec) {
+  document.getElementById("v_party").value = name;
+  const btn = document.getElementById("v_party_btn");
+  btn.classList.remove("empty");
+  btn.classList.add("filled");
+  btn.innerHTML = esc(name) + (rec && (rec.firm || rec.city)
+    ? `<span class="sub">${esc([rec.firm, rec.city].filter(Boolean).join(" · "))}</span>` : "");
+  // pre-fill what we already know, without overwriting anything typed
+  if (rec) {
+    const f = document.getElementById("v_firm"), p = document.getElementById("v_contact");
+    if (f && !f.value && rec.firm) f.value = rec.firm;
+    if (p && !p.value && rec.phone) p.value = rec.phone;
+  }
+  const row = document.getElementById("newPartyRow");
+  const known = (specifiers || []).some(s => String(s.name).trim().toLowerCase() === name.trim().toLowerCase());
+  row.style.display = known ? "none" : "block";
+  if (known) document.getElementById("v_addspec").checked = false;
+}
+
+function clearParty() {
+  document.getElementById("v_party").value = "";
+  const btn = document.getElementById("v_party_btn");
+  btn.className = "picker-btn empty";
+  btn.textContent = "Tap to choose or add a party";
+  const row = document.getElementById("newPartyRow");
+  if (row) { row.style.display = "none"; document.getElementById("v_addspec").checked = false; }
+}
+
+function openPartyPicker() {
+  const pool = partyPool();
+  document.getElementById("modalRoot").innerHTML = `
+    <div class="modal-overlay" id="pickOverlay">
+      <div class="modal-sheet">
+        <h2 class="serif" style="margin-bottom:4px;">Choose a party</h2>
+        <div class="hint" id="pickHint">${pool.length
+          ? pool.length + " on file — search, or type a new name"
+          : "No specifiers loaded on this device yet — type the name to add it"}</div>
+        <input type="text" class="pick-search" id="pickSearch" placeholder="Search or type a new name…" autocomplete="off">
+        <div class="pick-list" id="pickList"></div>
+        <button class="btn-cancel" id="pickCancel" style="width:100%;margin-top:12px;">Cancel</button>
+      </div>
+    </div>`;
+
+  const ov = document.getElementById("pickOverlay");
+  ov.addEventListener("click", e => { if (e.target === ov) closeModal(); });
+  document.getElementById("pickCancel").addEventListener("click", closeModal);
+
+  const search = document.getElementById("pickSearch");
+  const list = document.getElementById("pickList");
+
+  const draw = () => {
+    const q = search.value.trim().toLowerCase();
+    const hits = q ? pool.filter(p => p.name.toLowerCase().includes(q) || p.firm.toLowerCase().includes(q)) : pool;
+    const exact = pool.some(p => p.name.toLowerCase() === q);
+    let html = "";
+    if (q && !exact) {
+      html += `<button class="pick-row pick-new" data-new="1">
+        <div class="pick-name">+ Use "${esc(search.value.trim())}" as a new party</div>
+        <div class="pick-meta">Not in your specifier list</div></button>`;
+    }
+    html += hits.map((p, i) => `<button class="pick-row" data-i="${pool.indexOf(p)}">
+        <div class="pick-name">${esc(p.name)}</div>
+        ${p.firm || p.phone || p.city ? `<div class="pick-meta">${esc([p.firm, p.city, p.phone].filter(Boolean).join(" · "))}</div>` : ""}
+      </button>`).join("");
+    if (!hits.length && !q) {
+      html += `<div class="pick-empty">Nothing on file yet.<br>Type a name above to add one.</div>`;
+    }
+    list.innerHTML = html;
+    list.querySelectorAll(".pick-row").forEach(b => b.addEventListener("click", () => {
+      if (b.dataset.new) setParty(search.value.trim(), null);
+      else { const r = pool[Number(b.dataset.i)]; setParty(r.name, r); }
+      closeModal();
+    }));
+  };
+
+  search.addEventListener("input", draw);
+  draw();
+  setTimeout(() => search.focus(), 80);
 }
 
 function refreshVisitUI() { applyRole(); refreshParties(); renderSyncBanner(); }
@@ -2746,31 +2901,36 @@ function wireQuickAdd() {
   });
 }
 
-/* ---- flag an unknown party on the visit form ---- */
+/* ---- open the picker from the party button ---- */
 function wireNewPartyCheck() {
-  const inp = document.getElementById("v_party");
-  const row = document.getElementById("newPartyRow");
-  if (!inp || !row) return;
-  const check = () => {
-    const v = inp.value.trim().toLowerCase();
-    const known = (specifiers || []).some(s => String(s.name).trim().toLowerCase() === v)
-               || PR.visits.some(x => String(x.party).trim().toLowerCase() === v);
-    const show = v.length >= 3 && !known;
-    row.style.display = show ? "block" : "none";
-    if (!show) document.getElementById("v_addspec").checked = false;
-  };
-  inp.addEventListener("input", check);
-  inp.addEventListener("change", check);
+  const btn = document.getElementById("v_party_btn");
+  if (btn) btn.addEventListener("click", openPartyPicker);
 }
 
 /* make sure the specifier list is loaded before the visit form needs it */
 async function ensureSpecifiers() {
-  if ((specifiers || []).length) { refreshParties(); return; }
-  try { if (getApiUrl()) { await loadOptions(); refreshParties(); } } catch (e) {}
+  if ((specifiers || []).length) { PR.specTried = true; refreshParties(); renderSyncBanner(); return; }
+  try { if (getApiUrl()) await loadOptions(); } catch (e) {}
+  PR.specTried = true;
+  refreshParties();
+  renderSyncBanner();
 }
 
 wireQuickAdd();
 wireNewPartyCheck();
+
+/* ---- remember the branch a device usually bills for ---- */
+(function wireBranchMemory() {
+  const sel = document.getElementById("b_branch");
+  if (!sel) return;
+  const KEY = "sspl_bill_branch";
+  const saved = lsGet(KEY, null);
+  if (saved && [...sel.options].some(o => o.value === saved)) sel.value = saved;
+  else if (PR.identity && PR.identity.branch && [...sel.options].some(o => o.value === PR.identity.branch)) {
+    sel.value = PR.identity.branch;
+  }
+  sel.addEventListener("change", () => lsSet(KEY, sel.value));
+})();
 
 </script>
 </body>
