@@ -411,6 +411,18 @@
   .req-star { color: var(--danger); font-weight: 800; }
   .lock-note { font-size: 11px; color: var(--sub2); text-align: center; margin-top: 9px; line-height: 1.5; }
 
+  /* ---- quick-add controls ---- */
+  .lbl-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .mini-add {
+    background: none; border: none; color: var(--navy); font-size: 11px; font-weight: 800;
+    padding: 2px 0; text-decoration: underline; text-underline-offset: 2px; letter-spacing: 0.2px;
+  }
+  body[data-theme="dark"] .mini-add { color: var(--gold2); }
+  .mini-add:active { opacity: 0.6; }
+  .chk-row { display: flex; align-items: flex-start; gap: 9px; font-size: 12px; color: var(--sub); line-height: 1.45; font-weight: 600; cursor: pointer; }
+  .chk-row input { width: 17px; height: 17px; margin: 1px 0 0; flex-shrink: 0; accent-color: var(--navy); }
+  .new-party { background: var(--warn-soft); border: 1px solid #F0DCB4; border-radius: var(--r-sm); padding: 10px 12px; }
+
   .bottom-nav.hidden { display: none; }
 </style>
 </head>
@@ -508,11 +520,11 @@ Rahul Verma	RV Architects			N"></textarea>
         <div class="form-row"><label>Date</label><input type="date" id="b_date"></div>
         <div class="form-row"><label>Bill No.</label><input type="text" id="b_billno" placeholder="e.g. INV-2026-0451"></div>
         <div class="form-row">
-          <label>Specifier</label>
+          <label class="lbl-row">Specifier <button type="button" class="mini-add" id="addSpecBtn">+ Add new</button></label>
           <select id="b_specifier"><option value="">Select specifier…</option></select>
         </div>
         <div class="form-row">
-          <label>Brand / Product</label>
+          <label class="lbl-row">Brand / Product <button type="button" class="mini-add" id="addBrandBtn">+ Add new</button></label>
           <select id="b_brand"><option value="">Select brand…</option></select>
         </div>
         <div class="form-row"><label>Invoice Value, excl. GST (₹)</label><input type="number" id="b_value" placeholder="e.g. 850000"></div>
@@ -572,6 +584,11 @@ Rahul Verma	RV Architects			N"></textarea>
           <label>Party / Specifier <span class="req-star">*</span></label>
           <input type="text" id="v_party" list="v_party_list" placeholder="Start typing — picks from your specifier list">
           <datalist id="v_party_list"></datalist>
+        </div>
+
+        <div class="form-row new-party" id="newPartyRow" style="display:none;">
+          <label class="chk-row"><input type="checkbox" id="v_addspec">
+            <span>Not in your specifier list yet — also add them to the master so they count for the scheme.</span></label>
         </div>
 
         <div class="form-2col">
@@ -1870,6 +1887,7 @@ async function submitVisit() {
   if (!party) { showMsg(msg, "Party / specifier name is required.", false); return; }
   if (PR.settings.requirePhoto && !PR.photo) { showMsg(msg, "A visit photo is required by your PR head.", false); return; }
 
+  const addAsSpec = g("v_addspec") && g("v_addspec").checked;
   const btn = g("v_submit"); btn.disabled = true; btn.textContent = "Saving…";
 
   const now = new Date();
@@ -1903,9 +1921,22 @@ async function submitVisit() {
   addVRecent(visit);
   resetVisitForm();
 
+  // if the PR exec flagged this party as new, add them to the specifier master too
+  let specNote = "";
+  if (addAsSpec) {
+    try {
+      const r = await postEntry({ type: "specifier", name: visit.party, firm: visit.firm,
+                                  phone: visit.contact, city: "", email: "", registered: true });
+      if (r && r.ok) {
+        specNote = " " + visit.party + " added to your specifier list.";
+        try { await loadOptions(); refreshParties(); } catch (e) {}
+      }
+    } catch (e) {}
+  }
+
   const res = await syncQueue();
-  showMsg(msg, res.pushed > 0 ? "Visit saved and synced to the team sheet."
-        : "Visit saved offline — it will sync automatically when you're back online.", true);
+  showMsg(msg, (res.pushed > 0 ? "Visit saved and synced to the team sheet."
+        : "Visit saved offline — it will sync automatically when you're back online.") + specNote, true);
   btn.textContent = "Save visit";
   renderSyncBanner();
 }
@@ -1917,6 +1948,8 @@ function resetVisitForm() {
   document.getElementById("photoPrev").innerHTML = "";
   document.getElementById("photoDrop").classList.remove("has-file");
   document.getElementById("photoText").innerHTML = "&#128247; Tap to capture a photo";
+  const npr = document.getElementById("newPartyRow");
+  if (npr) { npr.style.display = "none"; document.getElementById("v_addspec").checked = false; }
   PR.fix = null;
   setGeoState("idle", "GPS is compulsory before a visit can be saved");
   lockSubmit();
@@ -1939,7 +1972,9 @@ async function syncQueue() {
     const v = PR.visits.find(x => x.id === id);
     if (!v) { PR.queue = PR.queue.filter(q => q !== id); continue; }
     try {
-      const result = await postEntry(Object.assign({ type: "visit" }, v));
+      // NB: the visit's own `type` is the visit category (Architect, Site Visit…),
+      // so it must not clobber the payload discriminator. Send it as visitType.
+      const result = await postEntry(Object.assign({}, v, { type: "visit", visitType: v.type }));
       if (result && result.ok) {
         v.synced = true;
         if (result.photoUrl) { v.photoUrl = result.photoUrl; v.photo = ""; }
@@ -2526,6 +2561,7 @@ function setMode(mode) {
     activateTab("checkin");
     if (needsSetup()) openOnboarding(0);
     else { refreshVisitUI(); if (geoBlockedByOrigin()) setGeoState("denied", "GPS needs the proper web link — tap for details."); }
+    ensureSpecifiers();
   } else {
     document.getElementById("connectBox").style.display = connected ? "none" : "block";
     document.getElementById("mainArea").style.display = connected ? "block" : "none";
@@ -2545,7 +2581,7 @@ function onVisitTab(name) {
   if (name === "myday")   renderMyDay();
   if (name === "team")    renderTeamGate();
   if (name === "vreport") renderVRep();
-  if (name === "checkin") { renderSyncBanner(); refreshParties(); }
+  if (name === "checkin") { renderSyncBanner(); ensureSpecifiers(); }
 }
 
 function applyRole() {
@@ -2621,6 +2657,120 @@ function refreshVisitUI() { applyRole(); refreshParties(); renderSyncBanner(); }
   // opportunistic background sync + pull
   setTimeout(async () => { await syncQueue(); await pullVisits(); renderSyncBanner(); }, 2500);
 })();
+
+/* ==================================================================
+   QUICK ADD — brand & specifier, without leaving the form
+   ================================================================== */
+function quickModal(title, hint, fields, onSave) {
+  document.getElementById("modalRoot").innerHTML = `
+    <div class="modal-overlay" id="qaOverlay">
+      <div class="modal-sheet">
+        <h2 class="serif" style="margin-bottom:4px;">${esc(title)}</h2>
+        <div class="hint">${hint}</div>
+        ${fields.map(f => `
+          <div class="form-row">
+            <label>${esc(f.label)}${f.req ? ' <span class="req-star">*</span>' : ""}</label>
+            <input type="${f.type || "text"}" id="qa_${f.id}" placeholder="${esc(f.ph || "")}">
+          </div>`).join("")}
+        <div class="msg hidden" id="qa_msg"></div>
+        <button class="btn-submit" id="qa_save">Save</button>
+        <button class="btn-cancel" id="qa_cancel" style="width:100%;margin-top:9px;">Cancel</button>
+      </div>
+    </div>`;
+
+  const ov = document.getElementById("qaOverlay");
+  ov.addEventListener("click", e => { if (e.target === ov) closeModal(); });
+  document.getElementById("qa_cancel").addEventListener("click", closeModal);
+  setTimeout(() => { const f = document.getElementById("qa_" + fields[0].id); if (f) f.focus(); }, 60);
+
+  document.getElementById("qa_save").addEventListener("click", async () => {
+    const vals = {};
+    fields.forEach(f => vals[f.id] = document.getElementById("qa_" + f.id).value.trim());
+    const missing = fields.find(f => f.req && !vals[f.id]);
+    const msg = document.getElementById("qa_msg");
+    if (missing) { showMsg(msg, missing.label + " is required.", false); return; }
+    const btn = document.getElementById("qa_save");
+    btn.disabled = true; btn.textContent = "Saving…";
+    try {
+      await onSave(vals, msg);
+    } catch (e) {
+      showMsg(msg, "Couldn't save — check your connection.", false);
+      btn.disabled = false; btn.textContent = "Save";
+    }
+  });
+}
+
+function wireQuickAdd() {
+  const brandBtn = document.getElementById("addBrandBtn");
+  if (brandBtn) brandBtn.addEventListener("click", () => {
+    quickModal("Add a brand", "It joins the Brands list for everyone using this sheet.",
+      [{ id: "name", label: "Brand / product name", req: true, ph: "e.g. Hindware" }],
+      async (v, msg) => {
+        const r = await postEntry({ type: "brand_add", name: v.name });
+        if (r && r.ok) {
+          await loadOptions();
+          const sel = document.getElementById("b_brand");
+          if (sel) sel.value = v.name;
+          closeModal();
+        } else {
+          showMsg(msg, r && r.error ? r.error : "Couldn't add that brand.", false);
+          const b = document.getElementById("qa_save");
+          b.disabled = false; b.textContent = "Save";
+        }
+      });
+  });
+
+  const specBtn = document.getElementById("addSpecBtn");
+  if (specBtn) specBtn.addEventListener("click", () => {
+    quickModal("Add a specifier", "Adds them to your master list straight away.",
+      [{ id: "name",  label: "Name", req: true, ph: "e.g. Rohan Jhuria" },
+       { id: "firm",  label: "Firm / Studio", ph: "Optional" },
+       { id: "phone", label: "Phone", type: "tel", ph: "Optional" },
+       { id: "city",  label: "City", ph: "Optional" }],
+      async (v, msg) => {
+        const r = await postEntry({ type: "specifier", name: v.name, firm: v.firm,
+                                    phone: v.phone, city: v.city, email: "", registered: true });
+        if (r && r.ok) {
+          await loadOptions();
+          if (typeof loadSpecifierList === "function") { try { await loadSpecifierList(); } catch (e) {} }
+          const sel = document.getElementById("b_specifier");
+          if (sel) sel.value = v.name;
+          refreshParties();
+          closeModal();
+        } else {
+          showMsg(msg, r && r.error ? r.error : "Couldn't add that specifier.", false);
+          const b = document.getElementById("qa_save");
+          b.disabled = false; b.textContent = "Save";
+        }
+      });
+  });
+}
+
+/* ---- flag an unknown party on the visit form ---- */
+function wireNewPartyCheck() {
+  const inp = document.getElementById("v_party");
+  const row = document.getElementById("newPartyRow");
+  if (!inp || !row) return;
+  const check = () => {
+    const v = inp.value.trim().toLowerCase();
+    const known = (specifiers || []).some(s => String(s.name).trim().toLowerCase() === v)
+               || PR.visits.some(x => String(x.party).trim().toLowerCase() === v);
+    const show = v.length >= 3 && !known;
+    row.style.display = show ? "block" : "none";
+    if (!show) document.getElementById("v_addspec").checked = false;
+  };
+  inp.addEventListener("input", check);
+  inp.addEventListener("change", check);
+}
+
+/* make sure the specifier list is loaded before the visit form needs it */
+async function ensureSpecifiers() {
+  if ((specifiers || []).length) { refreshParties(); return; }
+  try { if (getApiUrl()) { await loadOptions(); refreshParties(); } } catch (e) {}
+}
+
+wireQuickAdd();
+wireNewPartyCheck();
 
 </script>
 </body>
