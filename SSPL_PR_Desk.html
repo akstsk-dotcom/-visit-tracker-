@@ -449,6 +449,28 @@
   .pick-new .pick-name { color: var(--warn); }
   .pick-empty { text-align: center; padding: 22px 10px; color: var(--sub2); font-size: 13px; line-height: 1.6; }
 
+  /* ---- multi-brand invoice lines ---- */
+  .bline { display: flex; gap: 7px; align-items: center; margin-bottom: 8px; }
+  .bline select { flex: 1.35; min-width: 0; margin: 0; }
+  .bline input { flex: 1; min-width: 0; margin: 0; }
+  .bline .rm {
+    width: 32px; height: 32px; flex-shrink: 0; border-radius: 9px; border: 1px solid var(--line);
+    background: var(--card); color: var(--danger); font-size: 17px; line-height: 1; padding: 0;
+  }
+  .bline .rm:disabled { opacity: 0.28; }
+  .line-add {
+    width: 100%; border: 1.5px dashed var(--line); background: none; color: var(--navy);
+    font-weight: 800; font-size: 12.5px; padding: 10px; border-radius: var(--r-sm); margin-top: 2px;
+  }
+  body[data-theme="dark"] .line-add { color: var(--gold2); }
+  .line-add:active { background: #F4F1E8; }
+  .line-total {
+    margin-top: 11px; padding: 11px 14px; border-radius: var(--r-sm);
+    background: var(--navy); color: #F4EFE3; font-size: 12.5px; font-weight: 700;
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .line-total b { font-size: 17px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; color: var(--gold2); }
+
   .bottom-nav.hidden { display: none; }
 </style>
 </head>
@@ -559,10 +581,19 @@ Rahul Verma	RV Architects			N"></textarea>
           <select id="b_specifier"><option value="">Select specifier…</option></select>
         </div>
         <div class="form-row">
-          <label class="lbl-row">Brand / Product <button type="button" class="mini-add" id="addBrandBtn">+ Add new</button></label>
-          <select id="b_brand"><option value="">Select brand…</option></select>
+          <label class="lbl-row">Items billed <span class="req-star">*</span>
+            <button type="button" class="mini-add" id="addBrandBtn">+ Add new brand</button></label>
+          <div id="billLines"></div>
+          <button type="button" class="line-add" id="addLineBtn">+ Add another brand to this invoice</button>
+          <div class="line-total" id="billTotal">Invoice total &nbsp;<b>₹0</b></div>
         </div>
-        <div class="form-row"><label>Invoice Value, excl. GST (₹)</label><input type="number" id="b_value" placeholder="e.g. 850000"></div>
+        <select id="b_brand" style="display:none;"><option value="">Select brand…</option></select>
+        <div class="form-row">
+          <label>Client / Ledger name</label>
+          <input type="text" id="b_client" list="b_client_list" placeholder="Who the invoice is billed to">
+          <datalist id="b_client_list"></datalist>
+        </div>
+        <input type="hidden" id="b_value">
         <div class="form-row"><label>Notes (optional)</label><textarea id="b_notes" rows="2"></textarea></div>
         <button class="btn-submit" id="b_submit">Save bill</button>
         <div class="msg hidden" id="b_msg"></div>
@@ -1202,20 +1233,31 @@ document.getElementById("b_submit").addEventListener("click", async () => {
   const value = document.getElementById("b_value").value;
   const msg = document.getElementById("b_msg");
   msg.className = "msg hidden";
-  if (!specifier || !value) { showMsg(msg, "Specifier and value are required.", false); return; }
+  const _lines = (typeof billLines === "function") ? billLines() : [];
+  const _bad = _lines.filter(l => !l.brand || !l.value);
+  if (!specifier) { showMsg(msg, "Please choose a specifier.", false); return; }
+  if (!_lines.length) { showMsg(msg, "Add at least one brand with a value.", false); return; }
+  if (_bad.length) { showMsg(msg, "Every line needs both a brand and a value.", false); return; }
   const btn = document.getElementById("b_submit");
   btn.disabled = true; btn.textContent = "Saving…";
   try {
     const result = await postEntry({
       type: "transaction", date: document.getElementById("b_date").value,
       billNo: document.getElementById("b_billno").value, specifier: specifier,
-      brand: document.getElementById("b_brand").value, value: value,
+      brand: _lines[0].brand, value: _lines.reduce((s, l) => s + l.value, 0),
+      lines: _lines,
       branch: document.getElementById("b_branch").value,
+      client: document.getElementById("b_client").value.trim(),
       notes: document.getElementById("b_notes").value,
     });
     if (result.ok) {
       showMsg(msg, "Saved to the sheet.", true);
-      addRecent(`₹${Number(value).toLocaleString("en-IN")}`, `${specifier} · ${document.getElementById("b_brand").value || "—"} · ${document.getElementById("b_branch").value}`);
+      const _tot = _lines.reduce((s, l) => s + l.value, 0);
+      const _cl = document.getElementById("b_client").value.trim();
+      addRecent(`₹${_tot.toLocaleString("en-IN")}`, `${specifier} · ${_lines.map(l => l.brand).join(", ")} · ${document.getElementById("b_branch").value}${_cl ? " · " + _cl : ""}`);
+      if (typeof rememberClient === "function") rememberClient(_cl);
+      if (typeof resetBillLines === "function") resetBillLines();
+      document.getElementById("b_client").value = "";
       document.getElementById("b_billno").value = "";
       document.getElementById("b_value").value = "";
       document.getElementById("b_notes").value = "";
@@ -2930,6 +2972,104 @@ wireNewPartyCheck();
     sel.value = PR.identity.branch;
   }
   sel.addEventListener("change", () => lsSet(KEY, sel.value));
+})();
+
+/* ==================================================================
+   MULTI-BRAND INVOICE LINES  +  CLIENT / LEDGER
+   ================================================================== */
+let BILL_LINES = 0;
+
+function brandOptions(selected) {
+  const src = document.getElementById("b_brand");
+  const list = src ? [...src.options].map(o => o.value).filter(Boolean) : [];
+  return `<option value="">Select brand…</option>` +
+    list.map(b => `<option${b === selected ? " selected" : ""}>${esc(b)}</option>`).join("");
+}
+
+function addBillLine(brand, value) {
+  const box = document.getElementById("billLines");
+  if (!box) return;
+  const id = ++BILL_LINES;
+  const row = document.createElement("div");
+  row.className = "bline";
+  row.dataset.id = id;
+  row.innerHTML = `
+    <select class="bl-brand">${brandOptions(brand || "")}</select>
+    <input type="number" class="bl-value" inputmode="numeric" placeholder="Value ₹" value="${value || ""}">
+    <button type="button" class="rm" title="Remove">&times;</button>`;
+  box.appendChild(row);
+  row.querySelector(".rm").addEventListener("click", () => { row.remove(); syncBillTotal(); });
+  row.querySelector(".bl-value").addEventListener("input", syncBillTotal);
+  row.querySelector(".bl-brand").addEventListener("change", syncBillTotal);
+  syncBillTotal();
+}
+
+function billLines() {
+  return [...document.querySelectorAll("#billLines .bline")].map(r => ({
+    brand: r.querySelector(".bl-brand").value,
+    value: Number(r.querySelector(".bl-value").value || 0),
+  })).filter(l => l.brand || l.value);
+}
+
+function syncBillTotal() {
+  const rows = [...document.querySelectorAll("#billLines .bline")];
+  const total = rows.reduce((s, r) => s + Number(r.querySelector(".bl-value").value || 0), 0);
+  const el = document.getElementById("billTotal");
+  if (el) el.innerHTML = `<span>Invoice total${rows.length > 1 ? ` · ${rows.length} items` : ""}</span>` +
+    `<b>₹${total.toLocaleString("en-IN")}</b>`;
+  const hidden = document.getElementById("b_value");
+  if (hidden) hidden.value = total || "";
+  rows.forEach(r => r.querySelector(".rm").disabled = rows.length === 1);
+}
+
+function refreshLineBrands() {
+  document.querySelectorAll("#billLines .bl-brand").forEach(sel => {
+    const keep = sel.value;
+    sel.innerHTML = brandOptions(keep);
+    sel.value = keep;
+  });
+}
+
+function resetBillLines() {
+  const box = document.getElementById("billLines");
+  if (!box) return;
+  box.innerHTML = "";
+  addBillLine("", "");
+}
+
+function refreshClients() {
+  const dl = document.getElementById("b_client_list");
+  if (!dl) return;
+  const names = [...new Set((reportData && reportData.specifiers ? [] : []).concat(
+    lsGet("sspl_clients", [])))].filter(Boolean).sort();
+  dl.innerHTML = names.map(n => `<option value="${esc(n)}">`).join("");
+}
+
+function rememberClient(name) {
+  if (!name) return;
+  const list = lsGet("sspl_clients", []);
+  if (!list.some(x => x.toLowerCase() === name.toLowerCase())) {
+    list.push(name);
+    lsSet("sspl_clients", list.slice(-400));
+  }
+  refreshClients();
+}
+
+(function initBillLines() {
+  const add = document.getElementById("addLineBtn");
+  if (!add) return;
+  add.addEventListener("click", () => addBillLine("", ""));
+  resetBillLines();
+  refreshClients();
+  // keep the line dropdowns in step with the brand list
+  const origLoad = window.loadOptions;
+  if (typeof origLoad === "function") {
+    window.loadOptions = async function () {
+      const r = await origLoad.apply(this, arguments);
+      refreshLineBrands();
+      return r;
+    };
+  }
 })();
 
 </script>
