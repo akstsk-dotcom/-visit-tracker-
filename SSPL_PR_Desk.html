@@ -471,6 +471,8 @@
   }
   .line-total b { font-size: 17px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; color: var(--gold2); }
 
+  .pick-hint { font-size: 11px; font-weight: 800; color: var(--warn); text-transform: uppercase; letter-spacing: 0.6px; padding: 8px 4px 6px; }
+
   .bottom-nav.hidden { display: none; }
 </style>
 </head>
@@ -577,8 +579,10 @@ Rahul Verma	RV Architects			N"></textarea>
           </div>
         </div>
         <div class="form-row">
-          <label class="lbl-row">Specifier <button type="button" class="mini-add" id="addSpecBtn">+ Add new</button></label>
-          <select id="b_specifier"><option value="">Select specifier…</option></select>
+          <label class="lbl-row">Specifier <span class="req-star">*</span>
+            <button type="button" class="mini-add" id="addSpecBtn">+ Add new</button></label>
+          <button type="button" class="picker-btn empty" id="b_spec_btn">Tap to search your specifiers</button>
+          <select id="b_specifier" style="display:none;"><option value="">Select specifier…</option></select>
         </div>
         <div class="form-row">
           <label class="lbl-row">Items billed <span class="req-star">*</span>
@@ -1257,6 +1261,7 @@ document.getElementById("b_submit").addEventListener("click", async () => {
       addRecent(`₹${_tot.toLocaleString("en-IN")}`, `${specifier} · ${_lines.map(l => l.brand).join(", ")} · ${document.getElementById("b_branch").value}${_cl ? " · " + _cl : ""}`);
       if (typeof rememberClient === "function") rememberClient(_cl);
       if (typeof resetBillLines === "function") resetBillLines();
+      if (typeof clearBillSpecifier === "function") clearBillSpecifier();
       document.getElementById("b_client").value = "";
       document.getElementById("b_billno").value = "";
       document.getElementById("b_value").value = "";
@@ -3071,6 +3076,165 @@ function rememberClient(name) {
     };
   }
 })();
+
+/* ==================================================================
+   SHARED SEARCHABLE PICKER  (used by Log Bill and PR Visits)
+   Typing narrows the list; if nothing matches outright we fall back to
+   close-spelling suggestions, so "agrawal" still finds "Agarwal".
+   ================================================================== */
+function editDistance(a, b) {
+  if (a === b) return 0;
+  if (!a.length || !b.length) return Math.max(a.length, b.length);
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+function scoreMatch(q, name, firm) {
+  const n = name.toLowerCase(), f = (firm || "").toLowerCase();
+  if (n === q) return 1000;
+  if (n.startsWith(q)) return 900 - n.length;
+  const words = n.split(/\s+/);
+  if (words.some(w => w.startsWith(q))) return 800 - n.length;
+  if (n.includes(q)) return 700 - n.length;
+  if (f.includes(q)) return 600 - n.length;
+  // typo tolerance: compare against each word, allow ~1 slip per 4 characters
+  let best = Infinity;
+  words.forEach(w => {
+    if (Math.abs(w.length - q.length) <= 3) best = Math.min(best, editDistance(q, w));
+  });
+  const allow = Math.max(1, Math.floor(q.length / 4) + 1);
+  if (best <= allow) return 400 - best * 20 - n.length;
+  return -1;
+}
+
+function openPicker(opts) {
+  const items = opts.items || [];
+  document.getElementById("modalRoot").innerHTML = `
+    <div class="modal-overlay" id="pickOverlay">
+      <div class="modal-sheet">
+        <h2 class="serif" style="margin-bottom:4px;">${esc(opts.title)}</h2>
+        <div class="hint">${esc(opts.hint || "")}</div>
+        <input type="text" class="pick-search" id="pickSearch" placeholder="${esc(opts.placeholder || "Type to search…")}" autocomplete="off">
+        <div class="pick-list" id="pickList"></div>
+        <button class="btn-cancel" id="pickCancel" style="width:100%;margin-top:12px;">Cancel</button>
+      </div>
+    </div>`;
+
+  const ov = document.getElementById("pickOverlay");
+  ov.addEventListener("click", e => { if (e.target === ov) closeModal(); });
+  document.getElementById("pickCancel").addEventListener("click", closeModal);
+
+  const search = document.getElementById("pickSearch");
+  const list = document.getElementById("pickList");
+  const LIMIT = 60;
+
+  const draw = () => {
+    const raw = search.value.trim();
+    const q = raw.toLowerCase();
+    let hits, fuzzy = false;
+    if (!q) {
+      hits = items.slice(0, LIMIT);
+    } else {
+      const direct = items.map(it => ({ it, s: scoreMatch(q, it.name, it.firm) }))
+                          .filter(x => x.s > 0).sort((a, b) => b.s - a.s);
+      fuzzy = direct.length > 0 && direct[0].s < 600;
+      hits = direct.slice(0, LIMIT).map(x => x.it);
+    }
+    const exact = items.some(it => it.name.toLowerCase() === q);
+
+    let html = "";
+    if (q && opts.allowNew && !exact) {
+      html += `<button class="pick-row pick-new" data-new="1">
+        <div class="pick-name">+ Use "${esc(raw)}" as a new party</div>
+        <div class="pick-meta">Not in your specifier list</div></button>`;
+    }
+    if (q && fuzzy && hits.length) {
+      html += `<div class="pick-hint">No exact match — closest names:</div>`;
+    }
+    html += hits.map(it => {
+      const meta = [it.firm, it.city, it.phone].filter(Boolean).join(" · ");
+      return `<button class="pick-row" data-i="${items.indexOf(it)}">
+        <div class="pick-name">${esc(it.name)}${it.registered ? ` <span class="chip ok" style="font-size:9px;padding:2px 7px;">Scheme</span>` : ""}</div>
+        ${meta ? `<div class="pick-meta">${esc(meta)}</div>` : ""}</button>`;
+    }).join("");
+    if (!hits.length && !opts.allowNew) {
+      html += `<div class="pick-empty">Nothing matches "${esc(raw)}".<br>Check the spelling, or add them with <b>+ Add new</b>.</div>`;
+    }
+    if (!q && items.length > LIMIT) {
+      html += `<div class="pick-empty">Showing the first ${LIMIT} of ${items.length}.<br>Type to search the rest.</div>`;
+    }
+    list.innerHTML = html;
+    list.querySelectorAll(".pick-row").forEach(b => b.addEventListener("click", () => {
+      if (b.dataset.new) opts.onPick({ name: search.value.trim() }, true);
+      else opts.onPick(items[Number(b.dataset.i)], false);
+      closeModal();
+    }));
+  };
+
+  search.addEventListener("input", draw);
+  draw();
+  setTimeout(() => search.focus(), 80);
+}
+
+/* ---- Log Bill specifier ---- */
+function setBillSpecifier(rec) {
+  const sel = document.getElementById("b_specifier");
+  const btn = document.getElementById("b_spec_btn");
+  if (!sel || !btn) return;
+  if (![...sel.options].some(o => o.value === rec.name)) {
+    sel.insertAdjacentHTML("beforeend", `<option value="${esc(rec.name)}">${esc(rec.name)}</option>`);
+  }
+  sel.value = rec.name;
+  btn.classList.remove("empty");
+  btn.classList.add("filled");
+  const meta = [rec.firm, rec.city].filter(Boolean).join(" · ");
+  btn.innerHTML = esc(rec.name) + (rec.registered ? ` <span class="chip ok" style="font-size:9px;padding:2px 7px;">Scheme</span>` : "")
+    + (meta ? `<span class="sub">${esc(meta)}</span>` : "");
+}
+
+function clearBillSpecifier() {
+  const sel = document.getElementById("b_specifier");
+  const btn = document.getElementById("b_spec_btn");
+  if (sel) sel.value = "";
+  if (btn) { btn.className = "picker-btn empty"; btn.textContent = "Tap to search your specifiers"; }
+}
+
+(function wireBillSpecifier() {
+  const btn = document.getElementById("b_spec_btn");
+  if (!btn) return;
+  btn.addEventListener("click", () => openPicker({
+    title: "Find a specifier",
+    hint: (specifiers || []).length
+      ? `${specifiers.length} on file · ${(specifiers || []).filter(s => s.registered).length} in the scheme`
+      : "Specifier list hasn't loaded yet",
+    placeholder: "Type a name or firm…",
+    items: (specifiers || []).map(s => ({ name: s.name, firm: s.firm || "", city: s.city || "",
+                                          phone: s.phone || "", registered: !!s.registered })),
+    allowNew: false,
+    onPick: rec => setBillSpecifier(rec),
+  }));
+})();
+
+/* PR Visits reuses the same picker, but there a new name is allowed */
+function openPartyPicker() {
+  const pool = partyPool();
+  openPicker({
+    title: "Choose a party",
+    hint: pool.length ? `${pool.length} on file — search, or type a new name`
+                      : "No specifiers loaded on this device yet — type the name to add it",
+    placeholder: "Search or type a new name…",
+    items: pool,
+    allowNew: true,
+    onPick: (rec, isNew) => setParty(rec.name, isNew ? null : rec),
+  });
+}
 
 </script>
 </body>
