@@ -1634,19 +1634,34 @@ function acquireBestFix({ target = 30, maxMs = 18000, onProgress } = {}) {
 
 async function reverseGeocode(lat, lng) {
   const out = { address: "", locality: "" };
+  const uniq = (arr) => { const seen = new Set(); return arr.filter(x => { const k = String(x).trim().toLowerCase(); if (!k || seen.has(k)) return false; seen.add(k); return true; }); };
+
+  // 1) OpenStreetMap — street / neighbourhood level (shop, road, area, town)
   try {
-    const r = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`);
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 7000);
+    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&accept-language=en`, { signal: ctl.signal });
+    clearTimeout(timer);
     const d = await r.json();
-    out.locality = d.locality || d.city || d.principalSubdivision || "";
-    const parts = [d.locality, d.city, d.principalSubdivision].filter(Boolean);
-    out.address = [...new Set(parts)].join(", ");
+    const a = d.address || {};
+    const place = d.name || a.amenity || a.building || a.shop || a.office || a.tourism || a.leisure || "";
+    const road  = [a.house_number, a.road].filter(Boolean).join(" ");
+    const area  = a.suburb || a.quarter || a.city_district || "";
+    const town  = a.village || a.town || a.city || a.county || "";
+    const parts = uniq([place, road, a.neighbourhood, area, town]).slice(0, 5);
+    if (parts.length) {
+      out.address = parts.join(", ");
+      out.locality = a.suburb || a.neighbourhood || a.quarter || a.city_district || town || "";
+    }
   } catch (e) {}
+
+  // 2) fallback — coarse (locality / city / state) if OpenStreetMap gave nothing
   if (!out.address) {
     try {
-      const r2 = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=16`);
+      const r2 = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`);
       const d2 = await r2.json();
-      out.address = d2.display_name ? d2.display_name.split(",").slice(0, 4).join(",").trim() : "";
-      out.locality = (d2.address && (d2.address.suburb || d2.address.city || d2.address.town || d2.address.village)) || out.locality;
+      out.locality = d2.locality || d2.city || d2.principalSubdivision || "";
+      out.address = uniq([d2.locality, d2.city, d2.principalSubdivision]).join(", ");
     } catch (e) {}
   }
   return out;
