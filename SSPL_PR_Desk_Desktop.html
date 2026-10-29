@@ -751,6 +751,7 @@ Rahul Verma	RV Architects			N"></textarea>
     <div class="panel" id="panel-checkin">
       <div id="vSyncBanner"></div>
 
+      <div class="card" id="dayCard" style="margin-bottom:14px;"></div>
       <div class="geo-tile" id="geoTile">
         <span class="radar"></span><span class="radar"></span><span class="radar"></span>
         <span class="geo-pin" id="geoPin">&#128205;</span>
@@ -885,6 +886,7 @@ Rahul Verma	RV Architects			N"></textarea>
           <label>Report</label>
           <select id="vrep_kind">
             <option value="daily">Daily Visit Register — every visit, chronological</option>
+            <option value="km">Daily KM Log — start, end, road KM per person</option>
             <option value="exec">Executive Performance Summary</option>
             <option value="followup">Follow-ups Due</option>
             <option value="area">Area Coverage Analysis</option>
@@ -2158,7 +2160,10 @@ async function submitVisit() {
     photo: PR.photo || "", photoUrl: "",
     synced: false, flags: [],
   };
-  visit.flags = flagVisit(visit, mine);
+  visit.flags = flagVisit(visit, mine.filter(v => !isEvt(v)));
+  if (!mine.some(e => e.type === "Day Start")) visit.flags.push("No Day Start");
+  { const leg = await computeLeg(mine[mine.length - 1] || null, visit);
+    visit.km = leg.km; visit.kmEst = leg.est; if (leg.est) visit.flags.push("KM estimated"); }
 
   PR.visits.push(visit);
   lsSet(VK.cache, PR.visits.slice(-800));
@@ -2245,7 +2250,7 @@ async function pullVisits() {
     const server = data.visits || [];
     if (!server.length) return false;
     const byId = {};
-    server.forEach(v => { v.synced = true; v.flags = v.flags || []; byId[v.id] = v; });
+    server.forEach(v => { v.synced = true; v.flags = v.flags || []; const loc = PR.visits.find(x => x.id === v.id); if (loc && v.km == null && loc.km != null) { v.km = loc.km; v.kmEst = loc.kmEst; } byId[v.id] = v; });
     PR.visits.filter(v => !v.synced).forEach(v => { if (!byId[v.id]) byId[v.id] = v; });
     PR.visits = Object.values(byId).sort((a,b) => (a.ts||"").localeCompare(b.ts||""));
     lsSet(VK.cache, PR.visits.slice(-800));
@@ -2292,21 +2297,179 @@ function renderSyncBanner() {
 /* ==================================================================
    DATA SELECTORS
    ================================================================== */
-function visitsIn(rangeKey, execFilter) {
+function recsIn(rangeKey, execFilter) {
   const { from, to } = rangeBounds(rangeKey);
   return PR.visits
     .filter(v => v.date >= from && v.date <= to)
     .filter(v => !execFilter || execFilter === "All" || v.exec === execFilter)
     .sort((a,b) => (a.ts||"").localeCompare(b.ts||""));
 }
+function visitsIn(rangeKey, execFilter) { return recsIn(rangeKey, execFilter).filter(v => !isEvt(v)); }
 function execNames() { return [...new Set(PR.visits.map(v => v.exec))].filter(Boolean).sort(); }
 const initials = n => String(n||"?").trim().split(/\s+/).slice(0,2).map(w => w[0]).join("").toUpperCase();
 
-function dayDistance(list) {
-  let km = 0;
-  for (let i = 1; i < list.length; i++) if (list[i].lat != null && list[i-1].lat != null) km += haversine(list[i-1], list[i]);
-  return km;
+
+/* ==================================================================
+   DAY LOG + ROAD-DISTANCE KM
+   Start Day / Return to SR / End Day are saved as rows in the Visits
+   sheet (VisitType = Day Start / Return to SR / Day End) so KM is the
+   exact road distance between every consecutive GPS point of the day.
+   ================================================================== */
+const DAY_EVT = ["Day Start", "Return to SR", "Day End"];
+const isEvt = v => DAY_EVT.indexOf(v.type) !== -1;
+const SHOWROOMS = [
+  { name: "Ulubari SR (Corre Esplanade)", lat: 26.1758306, lng: 91.7558257 },
+  { name: "Jorabat SR",                   lat: 26.1020659, lng: 91.8634516 },
+  { name: "Core Mansion",                 lat: null,       lng: null       },   // add coordinates when available
+];
+const SR_FENCE_M = 300;            // must be this close to the showroom (plus GPS accuracy) to mark it
+const RK = "sspl_pr_roadcache";
+
+async function roadKm(a, b) {
+  const key = [a.lat, a.lng, b.lat, b.lng].map(x => Number(x).toFixed(4)).join(",");
+  const cache = lsGet(RK, {});
+  if (cache[key] != null) return { km: cache[key], est: false };
+  try {
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 7000);
+    const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=false`, { signal: ctl.signal });
+    clearTimeout(t);
+    const j = await r.json();
+    if (j && j.code === "Ok" && j.routes && j.routes[0]) {
+      const km = Math.round(j.routes[0].distance / 10) / 100;
+      const keys = Object.keys(cache); if (keys.length > 600) delete cache[keys[0]];
+      cache[key] = km; lsSet(RK, cache);
+      return { km, est: false };
+    }
+  } catch (e) {}
+  return { km: Math.round(haversine(a, b) * 1.3 * 100) / 100, est: true };   // offline / routing unavailable
 }
+
+function dayRecs(exec, date) {
+  return PR.visits.filter(v => v.exec === exec && v.date === date).sort((a, b) => (a.ts || "").localeCompare(b.ts || ""));
+}
+function prevOf(v) {
+  const l = dayRecs(v.exec, v.date); const i = l.findIndex(x => x.id === v.id);
+  return i > 0 ? l[i - 1] : null;
+}
+// KM of the leg that ENDS at this record (stored road km, else an estimate for older records)
+function legKm(v) {
+  if (v.km != null && v.km !== "" && !isNaN(v.km)) return Number(v.km);
+  const p = prevOf(v);
+  if (!p || v.type === "Day Start" || p.type === "Day End" || p.lat == null || v.lat == null) return 0;
+  return haversine(p, v) * 1.3;
+}
+async function computeLeg(prev, cur) {
+  if (!prev || cur.type === "Day Start" || prev.type === "Day End" || prev.lat == null || cur.lat == null) return { km: 0, est: false };
+  return roadKm(prev, cur);
+}
+function dayState() {
+  if (!PR.identity) return { s: "none", recs: [] };
+  const recs = dayRecs(PR.identity.name, todayStr());
+  const ev = recs.filter(isEvt); const last = ev[ev.length - 1];
+  if (!last) return { s: "none", recs };
+  const start = ev.slice().reverse().find(e => e.type === "Day Start");
+  return { s: last.type === "Day Start" ? "out" : last.type === "Return to SR" ? "sr" : "ended", last, start, recs };
+}
+function setDayMsg(t, ok) { const m = document.getElementById("dayMsg"); if (m) showMsg(m, t, ok); }
+
+function chooseSR(title, extras) {
+  return new Promise(resolve => {
+    const ov = document.createElement("div");
+    ov.style.cssText = "position:fixed;inset:0;background:rgba(11,37,69,.55);z-index:99999;display:flex;align-items:flex-end;justify-content:center;";
+    const btn = (label, val, alt) => `<button data-v="${esc(val)}" style="width:100%;padding:14px;margin-top:10px;border-radius:14px;border:1.5px solid ${alt ? "#C0392B" : "#0B2545"};background:${alt ? "#fff" : "#0B2545"};color:${alt ? "#C0392B" : "#fff"};font-weight:700;font-size:14px;">${esc(label)}</button>`;
+    ov.innerHTML = `<div style="background:#fff;width:100%;max-width:460px;border-radius:22px 22px 0 0;padding:20px 18px 24px;">
+      <div style="font-weight:800;font-size:16px;color:#0B2545;">${esc(title)}</div>
+      ${SHOWROOMS.map(s => btn(s.name, s.name)).join("")}
+      ${(extras || []).map(x => btn(x.label, x.value, true)).join("")}
+      <button data-v="" style="width:100%;padding:12px;margin-top:10px;border:none;background:none;color:#6B7684;font-weight:600;">Cancel</button></div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener("click", e => { const b = e.target.closest("button"); if (!b && e.target !== ov) return; ov.remove(); resolve(b ? b.dataset.v : ""); });
+  });
+}
+
+async function logDayEvent(kind, srName, opts) {
+  opts = opts || {};
+  if (PR.dayBusy) return; PR.dayBusy = true;
+  setDayMsg("Getting your GPS fix…", true);
+  try {
+    if (geoBlockedByOrigin()) { setDayMsg("GPS needs the proper web link, not a saved file.", false); PR.dayBusy = false; return; }
+    const fix = await acquireBestFix({ target: 30, maxMs: 20000, onProgress: f => setDayMsg(`Refining GPS… ±${f.acc} m`, true) });
+    const sr = SHOWROOMS.find(s => s.name === srName);
+    const flags = [];
+    if (sr && sr.lat != null) {
+      const d = haversine(fix, sr) * 1000;
+      if (d > SR_FENCE_M + fix.acc) { setDayMsg(`You are ${fmtKm(d / 1000)} away from ${sr.name}. "${kind}" can only be marked at the showroom.`, false); PR.dayBusy = false; return; }
+    } else if (sr) flags.push("SR location not verified");
+    if (opts.flag) flags.push(opts.flag);
+    if (fix.acc > PR.settings.maxAccuracy) flags.push("Weak GPS ±" + fix.acc + "m");
+    let geo = { address: "", locality: "" };
+    try { geo = await reverseGeocode(fix.lat, fix.lng); } catch (e) {}
+    const now = new Date();
+    const rec = {
+      id: newVisitId(), date: todayStr(), time: nowTime(), ts: now.toISOString(),
+      exec: PR.identity.name, branch: PR.identity.branch,
+      type: kind, party: srName || opts.place || "", firm: "", contact: "-",
+      purpose: "Day Log", outcome: "Day Log", potential: 0, followup: "", notes: opts.note || "",
+      lat: fix.lat, lng: fix.lng, acc: fix.acc, address: geo.address || "", locality: geo.locality || "",
+      mapLink: mapLink(fix.lat.toFixed(6), fix.lng.toFixed(6)),
+      photo: "", photoUrl: "", synced: false, flags,
+    };
+    const prev = dayRecs(rec.exec, rec.date).slice(-1)[0] || null;
+    const leg = await computeLeg(prev, rec);
+    rec.km = leg.km; rec.kmEst = leg.est;
+    if (leg.est) flags.push("KM estimated");
+    PR.visits.push(rec); lsSet(VK.cache, PR.visits.slice(-800));
+    PR.queue.push(rec.id); lsSet(VK.queue, PR.queue);
+    const res = await syncQueue();
+    const kmTxt = leg.km ? ` · ${leg.km.toFixed(1)} km from previous point` : "";
+    setDayMsg(`${kind} marked at ${rec.time}${srName ? " · " + srName : ""}${kmTxt}${res.pushed > 0 ? "" : " · saved offline, will sync"}`, true);
+    renderSyncBanner();
+  } catch (err) {
+    if (err && err.code === 1) setDayMsg("Location permission was refused. Enable it to mark your day.", false);
+    else setDayMsg("No GPS signal. Step outdoors or near a window and try again.", false);
+  }
+  PR.dayBusy = false;
+  renderDayCard();
+}
+
+async function dayStart(label) {
+  const sr = await chooseSR(label || "Start Day — which showroom are you at?");
+  if (sr) logDayEvent("Day Start", sr);
+}
+async function dayReturn() {
+  const sr = await chooseSR("Return to SR — which showroom?");
+  if (sr) logDayEvent("Return to SR", sr);
+}
+async function dayEnd() {
+  const sr = await chooseSR("End Day — which showroom are you at?", [{ label: "End here without returning to SR", value: "__NOSR__" }]);
+  if (!sr) return;
+  if (sr === "__NOSR__") logDayEvent("Day End", "", { place: "Ended away from SR", flag: "Ended without SR return" });
+  else logDayEvent("Day End", sr);
+}
+
+function renderDayCard() {
+  const el = document.getElementById("dayCard");
+  if (!el || !PR.identity) return;
+  const st = dayState();
+  const km = st.recs.reduce((s, r) => s + legKm(r), 0);
+  const visits = st.recs.filter(r => !isEvt(r)).length;
+  const b = (id, label, cls) => `<button class="btn-submit" id="${id}" style="margin-top:10px;${cls || ""}">${label}</button>`;
+  let head = "", body = "";
+  if (st.s === "none") {
+    head = "Start your day"; body = `<div class="hint">Mark Day Start at your showroom before you leave. Your KM is counted from this point.</div>` + b("dayStartBtn", "&#127980; Start Day at showroom");
+  } else if (st.s === "out") {
+    head = "On the road"; body = `<div class="hint">Started ${esc(st.start.time)} at ${esc(st.start.party)} · ${visits} visit${visits === 1 ? "" : "s"} · <b>${km.toFixed(1)} km</b> so far</div>` + b("dayRetBtn", "&#8617; Return to SR") + b("dayEndBtn", "&#127937; End Day", "background:#fff;color:#0B2545;border:1.5px solid #0B2545;");
+  } else if (st.s === "sr") {
+    head = "At showroom"; body = `<div class="hint">Returned ${esc(st.last.time)} · ${esc(st.last.party)} · <b>${km.toFixed(1)} km</b> so far today</div>` + b("dayStartBtn", "&#9654; Leave SR — Start again") + b("dayEndBtn", "&#127937; End Day", "background:#fff;color:#0B2545;border:1.5px solid #0B2545;");
+  } else {
+    head = "Day closed"; body = `<div class="hint">Ended ${esc(st.last.time)} · ${esc(st.last.party)} · ${visits} visit${visits === 1 ? "" : "s"} · <b>${km.toFixed(1)} km</b> today</div>` + b("dayStartBtn", "&#9654; Start Day again", "background:#fff;color:#0B2545;border:1.5px solid #0B2545;");
+  }
+  el.innerHTML = `<h2 class="serif">${head}</h2>${body}<div class="msg hidden" id="dayMsg"></div>`;
+  const on = (id, fn) => { const x = document.getElementById(id); if (x) x.addEventListener("click", fn); };
+  on("dayStartBtn", () => dayStart()); on("dayRetBtn", dayReturn); on("dayEndBtn", dayEnd);
+}
+
+function dayDistance(list) { return list.reduce((s, v) => s + legKm(v), 0); }
 
 function execSummary(rangeKey) {
   const list = visitsIn(rangeKey);
@@ -2325,7 +2488,7 @@ function execSummary(rangeKey) {
   return Object.values(map).map(m => {
     const byDay = {};
     m.visits.forEach(v => { (byDay[v.date] = byDay[v.date] || []).push(v); });
-    let km = 0; Object.values(byDay).forEach(d => km += dayDistance(d));
+    const km = recsIn(rangeKey).filter(r => r.exec === m.exec).reduce((a, r) => a + legKm(r), 0);
     const activeDays = Object.keys(byDay).length;
     return Object.assign(m, {
       count: m.visits.length, activeDays, km,
@@ -2352,7 +2515,7 @@ function renderRange(elId, current, onPick) {
 function renderMyDay() {
   renderRange("mydayRange", PR.mydayRange, k => { PR.mydayRange = k; renderMyDay(); });
   const list = visitsIn(PR.mydayRange, PR.identity ? PR.identity.name : null);
-  const km = (() => { const byDay = {}; list.forEach(v => (byDay[v.date] = byDay[v.date]||[]).push(v)); let t=0; Object.values(byDay).forEach(d => t += dayDistance(d)); return t; })();
+  const km = recsIn(PR.mydayRange, PR.identity ? PR.identity.name : null).reduce((a, r) => a + legKm(r), 0);
   const conv = list.filter(v => /Order confirmed|Enquiry generated|Quotation requested|Registered/.test(v.outcome||"")).length;
   const pot = list.reduce((s,v) => s + Number(v.potential||0), 0);
   const days = [...new Set(list.map(v => v.date))].length || 1;
@@ -2370,6 +2533,11 @@ function renderMyDay() {
         <div class="kpi-sub">value flagged by you</div></div>
     </div>`;
 
+  { const evs = recsIn(PR.mydayRange, PR.identity ? PR.identity.name : null).filter(isEvt);
+    if (evs.length) document.getElementById("mydayKpis").insertAdjacentHTML("beforeend",
+      `<div class="card" style="margin-top:12px;"><h2 class="serif" style="font-size:15px;">Day log</h2>` +
+      evs.map(e => `<div class="recent-row"><span class="amt">${esc(e.type)}${e.party ? " · " + esc(e.party) : ""}</span><span class="meta">${prettyDate(e.date)} ${esc(e.time)}${legKm(e) ? " · " + legKm(e).toFixed(1) + " km" : ""}</span></div>`).join("") + `</div>`);
+  }
   document.getElementById("mydayCount").textContent = rangeLabel(PR.mydayRange);
   document.getElementById("mydayRoot").innerHTML = list.length
     ? renderTimeline(list, true)
@@ -2386,7 +2554,7 @@ function renderTimeline(list, showGaps) {
     } else if (showGaps && i > 0) {
       const prev = list[i-1];
       const mins = Math.round((new Date(v.ts) - new Date(prev.ts)) / 60000);
-      const d = (prev.lat != null && v.lat != null) ? haversine(prev, v) : 0;
+      const d = legKm(v);
       if (mins > 0) out += `<div class="tl-gap">↓ ${mins < 60 ? mins + " min" : (mins/60).toFixed(1) + " hr"} · ${fmtKm(d)}</div>`;
     }
     const dotCls = (v.flags||[]).length ? "flag" : (!v.synced ? "pending" : "");
@@ -2584,15 +2752,42 @@ function buildVisitReport(kind, rangeKey, execFilter) {
   const period = rangeLabel(rangeKey);
   const who = execFilter && execFilter !== "All" ? " · " + execFilter : "";
 
+  if (kind === "km") {
+    const recs = recsIn(rangeKey, execFilter);
+    const groups = {};
+    recs.forEach(r => { const k = r.date + "|" + r.exec; (groups[k] = groups[k] || []).push(r); });
+    const rows = Object.keys(groups).sort().map(k => {
+      const g = groups[k]; const ev = g.filter(isEvt); const vs = g.filter(r => !isEvt(r));
+      const st = ev.find(e => e.type === "Day Start");
+      const en = ev.slice().reverse().find(e => e.type === "Day End");
+      const rets = ev.filter(e => e.type === "Return to SR").length;
+      const km = g.reduce((s, r) => s + legKm(r), 0);
+      const fl = [];
+      if (!st) fl.push("No Day Start");
+      if (!en && g[0].date < todayStr()) fl.push("No Day End");
+      if (g.some(r => r.kmEst)) fl.push("KM estimated");
+      if (g.some(r => (r.flags || []).indexOf("Ended without SR return") !== -1)) fl.push("No SR return");
+      return [prettyDate(g[0].date), g[0].exec,
+        st ? st.time + " " + st.party : "—", en ? en.time + " " + en.party : "—",
+        vs.length, rets, km.toFixed(1), fl.join(", ") || "OK"];
+    });
+    return {
+      title: "Daily KM Log", sub: period + who,
+      head: [["Date","Executive","Day Start","Day End","Visits","SR returns","KM (road)","Flags"]],
+      body: rows.length ? rows : [["—","","","No data in this period.","","","",""]],
+      widths: { 2: 34, 3: 34, 7: 30 },
+    };
+  }
+
   if (kind === "daily") {
     return {
       title: "Daily Visit Register", sub: period + who,
-      head: [["Date","Time","Executive","Party / Specifier","Type","Purpose","Outcome","Location","±m","Follow-up"]],
+      head: [["Date","Time","Executive","Party / Specifier","Type","Purpose","Outcome","Location","±m","Follow-up","KM"]],
       body: list.length ? list.map(v => [
         prettyDate(v.date), v.time, v.exec, v.party + (v.firm ? " (" + v.firm + ")" : ""),
         v.type, v.purpose, v.outcome, v.address || `${v.lat.toFixed(4)}, ${v.lng.toFixed(4)}`,
-        v.acc, v.followup ? prettyDate(v.followup) : "-",
-      ]) : [["—","","","No visits in this period.","","","","","",""]],
+        v.acc, v.followup ? prettyDate(v.followup) : "-", legKm(v).toFixed(1),
+      ]) : [["—","","","No visits in this period.","","","","","","",""]],
       widths: { 3: 34, 6: 30, 7: 38 },
     };
   }
@@ -2850,7 +3045,7 @@ function onVisitTab(name) {
   if (name === "myday")   renderMyDay();
   if (name === "team")    renderTeamGate();
   if (name === "vreport") renderVRep();
-  if (name === "checkin") { renderSyncBanner(); ensureSpecifiers(); }
+  if (name === "checkin") { renderSyncBanner(); renderDayCard(); ensureSpecifiers(); }
 }
 
 function applyRole() {
@@ -2872,6 +3067,7 @@ function partyPool() {
     pool.push({ name: s.name, firm: s.firm || "", phone: s.phone || "", city: s.city || "", known: true });
   });
   PR.visits.forEach(v => {
+    if (isEvt(v)) return;
     const k = String(v.party || "").trim().toLowerCase();
     if (!k || seen.has(k)) return;
     seen.add(k);
@@ -2967,7 +3163,7 @@ function openPartyPicker() {
   setTimeout(() => search.focus(), 80);
 }
 
-function refreshVisitUI() { applyRole(); refreshParties(); renderSyncBanner(); }
+function refreshVisitUI() { applyRole(); refreshParties(); renderSyncBanner(); renderDayCard(); }
 
 /* ==================================================================
    INIT
@@ -3017,6 +3213,7 @@ function refreshVisitUI() { applyRole(); refreshParties(); renderSyncBanner(); }
 
   applyRole();
   renderSyncBanner();
+  renderDayCard();
   lockSubmit();
 
   // opportunistic background sync + pull
