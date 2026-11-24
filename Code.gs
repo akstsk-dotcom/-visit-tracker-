@@ -41,8 +41,25 @@ var VISIT_HEADERS = ["VisitID", "Date", "Time", "Timestamp", "Executive", "Branc
 /* ==================================================================
    ENTRY POINTS
    ================================================================== */
+/* ---- ACCESS CODE (optional, off until you set it) ----
+   Open Project Settings > Script properties > add  ACCESS_CODE = your-secret-code
+   (or edit the value in setAccessCode below and run it once). While no code is set, everything works exactly as before. */
+function authorized_(key) {
+  var c = PropertiesService.getScriptProperties().getProperty("ACCESS_CODE");
+  if (!c) return true;
+  return String(key || "") === String(c);
+}
+function setAccessCode() {
+  var code = "CHANGE-ME";   // <- type your team code here, then Run
+  if (code === "CHANGE-ME") throw new Error("Edit the code first.");
+  PropertiesService.getScriptProperties().setProperty("ACCESS_CODE", code);
+}
+function clearAccessCode() { PropertiesService.getScriptProperties().deleteProperty("ACCESS_CODE"); }
+
 function doGet(e) {
   try {
+    if (!authorized_(e && e.parameter && e.parameter.key))
+      return jsonOut_({ ok: false, error: "unauthorized", auth: "required", specifiers: [], brands: [], visits: [] });
     var action = (e && e.parameter && e.parameter.action) || "";
     if (action === "visits") return getVisits_(e);
     if (action === "report") return jsonOut_(buildReport_());
@@ -55,6 +72,8 @@ function doGet(e) {
 function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
+    if (!authorized_(data.key)) return jsonOut_({ ok: false, error: "unauthorized" });
+    delete data.key;
     switch (data.type) {
       case "specifier":        return addSpecifier_(data);
       case "specifier_update": return updateSpecifier_(data);

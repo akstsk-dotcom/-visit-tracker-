@@ -8,6 +8,45 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <meta name="theme-color" content="#0B2545">
+<link rel="manifest" href="manifest-mobile.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="PR Desk"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<script id="pr-access">
+/* Team access code: only active if the backend has an ACCESS_CODE set. Adds the code to every Apps Script call. */
+(function(){
+  var KN='sspl_pr_access',KEY='';try{KEY=localStorage.getItem(KN)||''}catch(e){}
+  var of=window.fetch.bind(window);
+  function isApi(u){return typeof u==='string'&&u.indexOf('script.google.com/macros')>-1}
+  window.fetch=function(input,init){
+    var u=typeof input==='string'?input:'';
+    if(isApi(u)&&KEY){
+      if(init&&String(init.method||'').toUpperCase()==='POST'){try{var b=JSON.parse(init.body);b.key=KEY;init=Object.assign({},init,{body:JSON.stringify(b)})}catch(e){}}
+      else{input=u+(u.indexOf('?')>-1?'&':'?')+'key='+encodeURIComponent(KEY)}
+    }
+    var p=of(input,init);
+    if(isApi(u)){p.then(function(r){try{r.clone().json().then(function(j){if(j&&j.error==='unauthorized')ask()}).catch(function(){})}catch(e){}}).catch(function(){})}
+    return p;
+  };
+  var shown=false;
+  function ask(){
+    if(shown)return;shown=true;
+    var go=function(){
+      var d=document.createElement('div');
+      d.style.cssText='position:fixed;inset:0;z-index:2147483000;background:rgba(11,37,69,.96);display:flex;align-items:center;justify-content:center;padding:20px;font-family:Manrope,system-ui,sans-serif';
+      d.innerHTML='<div style="background:#fff;border-radius:18px;padding:26px 22px;max-width:340px;width:100%;text-align:center"><div style="font-size:34px">&#128274;</div><h3 style="margin:8px 0 4px;color:#0B2545">Team Access Code</h3><p style="margin:0 0 14px;color:#5a6577;font-size:13.5px">Enter the code given by your manager to use PR Desk.</p><input id="prAcc" type="password" autocomplete="off" style="width:100%;box-sizing:border-box;padding:12px;border:1.5px solid #ddd;border-radius:12px;font-size:16px;text-align:center"><div id="prAccM" style="color:#c0392b;font-size:12.5px;min-height:18px;margin-top:6px"></div><button id="prAccB" style="margin-top:6px;width:100%;padding:12px;border:0;border-radius:12px;background:#0B2545;color:#fff;font-weight:700;font-size:15px">Unlock</button></div>';
+      document.body.appendChild(d);
+      var i=d.querySelector('#prAcc');
+      function sub(){var v=i.value.trim();if(!v){d.querySelector('#prAccM').textContent='Enter the code.';return}try{localStorage.setItem(KN,v)}catch(e){}location.reload()}
+      d.querySelector('#prAccB').onclick=sub;i.addEventListener('keydown',function(e){if(e.key==='Enter')sub()});setTimeout(function(){i.focus()},100);
+    };
+    if(document.body)go();else document.addEventListener('DOMContentLoaded',go);
+  }
+  window.__prForgetAccess=function(){try{localStorage.removeItem(KN)}catch(e){}location.reload()};
+})();
+</script>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -3729,5 +3768,33 @@ function openPartyPicker() {
   el('iosBack').addEventListener('click',function(){if(history.state&&history.state.v!=='home')history.back();else render('home');});
 })();
 </script>
+<style id="pwa-css">
+#pwaBtn{position:fixed;top:max(8px,env(safe-area-inset-top));right:8px;z-index:9000;display:none;align-items:center;gap:6px;padding:7px 12px;border:0;border-radius:999px;background:#C9A227;color:#0B2545;font:800 12.5px Manrope,system-ui,sans-serif;box-shadow:0 6px 18px -6px rgba(0,0,0,.45);cursor:pointer}
+#pwaBtn svg{width:15px;height:15px}
+#pwaHelp{position:fixed;inset:0;z-index:2147482000;background:rgba(0,0,0,.55);display:none;align-items:flex-end;justify-content:center;font-family:Manrope,system-ui,sans-serif}
+#pwaHelp .c{background:#fff;border-radius:18px 18px 0 0;padding:20px;max-width:420px;width:100%;color:#16233A;font-size:14px;line-height:1.5}
+</style>
+<button id="pwaBtn" type="button" aria-label="Install app"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5M4 20h16"/></svg>Install</button>
+<div id="pwaHelp"><div class="c"><b style="font-size:16px">Install PR Desk</b><p id="pwaTxt" style="margin:8px 0 14px"></p><button type="button" id="pwaOk" style="width:100%;padding:11px;border:0;border-radius:12px;background:#0B2545;color:#fff;font-weight:700">Got it</button></div></div>
+<script id="pwa-js">
+(function(){
+  var b=document.getElementById('pwaBtn'),h=document.getElementById('pwaHelp'),dp=null;
+  var standalone=window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+  if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost')){navigator.serviceWorker.register('sw.js').catch(function(){})}
+  if(standalone)return;
+  var ios=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  function show(){setTimeout(function(){b.style.display='flex'},3300)}   // after the splash
+  window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();dp=e;show()});
+  window.addEventListener('appinstalled',function(){b.style.display='none';dp=null});
+  if(ios)show();
+  b.addEventListener('click',function(){
+    if(dp){dp.prompt();dp.userChoice.finally(function(){dp=null;b.style.display='none'});return}
+    document.getElementById('pwaTxt').innerHTML=ios?'Tap the <b>Share</b> button in Safari, then <b>Add to Home Screen</b>.':'Open the browser menu (&#8942;) and choose <b>Install app</b> / <b>Add to Home screen</b>. On Windows, click the install icon at the right of the address bar in Chrome or Edge.';
+    h.style.display='flex';
+  });
+  document.getElementById('pwaOk').onclick=function(){h.style.display='none'};
+})();
+</script>
+
 </body>
 </html>
